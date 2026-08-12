@@ -13,11 +13,17 @@ build/
 # 环境变量
 .env
 
-# 数据文件（不提交原始数据）
-data/raw/
+# 数据文件（不提交原始数据，但保留研究成果JSON）
+data/raw/*.csv
 data/processed/
 data/policy_docs/
 data/chroma_db/
+
+# 保留数据搜索成果
+!data/raw/emission_factors_research.json
+!data/raw/carbon_price_sources.json
+!data/raw/literature_review_raw.json
+!data/raw/policy_docs_catalog.json
 
 # Jupyter
 .ipynb_checkpoints/
