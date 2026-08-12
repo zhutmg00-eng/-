@@ -42,3 +42,6 @@ Thumbs.db
 # 日志
 *.log
 logs/
+__pycache__/
+.pytest_cache/
+*.pyc
