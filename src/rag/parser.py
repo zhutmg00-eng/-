@@ -6,7 +6,11 @@
 from typing import List, Dict
 from pathlib import Path
 import fitz  # PyMuPDF
-from docx import Document
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 from bs4 import BeautifulSoup
 import re
 
@@ -23,6 +27,9 @@ def parse_pdf(file_path: Path) -> str:
 
 def parse_docx(file_path: Path) -> str:
     """解析Word文档为纯文本"""
+    if not DOCX_AVAILABLE:
+        print(f"⚠️ python-docx未安装，无法解析: {file_path.name}")
+        return ""
     doc = Document(file_path)
     return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
 
