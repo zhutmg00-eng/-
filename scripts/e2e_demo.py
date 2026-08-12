@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""端到端测试 — 模拟物流企业使用完整流程
+
+场景：一家拥有100辆车的物流企业，使用本工具计算碳排放和合规成本
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.engine.calculator import VehicleGroupData, calculate_emission
+from src.engine.quota import estimate_quota_gap
+from src.engine.carbon_price import estimate_compliance_cost, load_carbon_price_data
+from src.engine.emission_factors import get_factor_comparison
+
+def run_e2e_demo():
+    print("=" * 60)
+    print("🌿 碳资产管理助手 — 端到端演示")
+    print("=" * 60)
+    
+    # === 1. 企业车队数据 ===
+    print("\n📋 企业：示例物流运输有限公司")
+    fleet = [
+        VehicleGroupData("重型柴油货车", 30, 80000, 0.75),
+        VehicleGroupData("中型柴油货车", 40, 50000, 0.70),
+        VehicleGroupData("轻型柴油货车", 20, 30000, 0.80),
+        VehicleGroupData("新能源物流车", 10, 40000, 0.75),
+    ]
+    
+    print(f"车队规模: {sum(g.count for g in fleet)} 辆")
+    for g in fleet:
+        print(f"  - {g.vehicle_type}: {g.count}辆, {g.annual_km:,}km/年, 满载率{g.load_factor:.0%}")
+    
+    # === 2. 碳排放基线计算 ===
+    print("\n" + "=" * 60)
+    print("📊 第一步：碳排放基线计算")
+    print("=" * 60)
+    
+    baseline = calculate_emission(fleet)
+    print(f"\n年度碳排放总量: {baseline.total_emission_t:,.1f} tCO₂")
+    print(f"总车辆数: {baseline.total_vehicles} 辆")
+    print(f"\n分车型排放明细:")
+    print(f"{'车型':<16} {'排放量(tCO₂)':>12} {'占比':>8} {'单辆排放':>10}")
+    for vtype, data in baseline.emission_by_type.items():
+        print(f"  {vtype:<14} {data['排放量_tCO2']:>10.1f} {data['占比']:>7.1f}% {data['单辆排放_tCO2']:>8.1f}")
+    
+    # === 3. 配额缺口估算 ===
+    print("\n" + "=" * 60)
+    print("📋 第二步：碳配额缺口估算")
+    print("=" * 60)
+    
+    fleet_summary = {g.vehicle_type: g.count for g in fleet}
+    gap = estimate_quota_gap(baseline.total_emission_t, fleet_summary)
+    
+    print(f"\n免费配额总量: {gap.total_quota_t:,.1f} tCO₂")
+    print(f"实际排放量:   {gap.total_emission_t:,.1f} tCO₂")
+    print(f"配额缺口:     {gap.gap_t:,.1f} tCO₂")
+    print(f"状态:         {gap.gap_status}")
+    
+    print(f"\n分车型配额明细:")
+    print(f"{'车型':<16} {'车辆数':>6} {'基准值':>8} {'配额(t)':>10}")
+    for vtype, data in gap.quota_by_type.items():
+        print(f"  {vtype:<14} {data['车辆数']:>4} {data['基准值_t_per_辆']:>6.0f} {data['配额_t']:>8.1f}")
+    
+    # === 4. 碳价成本估算 ===
+    print("\n" + "=" * 60)
+    print("💰 第三步：碳合规成本估算")
+    print("=" * 60)
+    
+    price_df = load_carbon_price_data()
+    cost = estimate_compliance_cost(gap.gap_t, price_df)
+    
+    print(f"\n合规需求: {cost['合规需求']}")
+    if "配额缺口_t" in cost:
+        print(f"配额缺口: {cost['配额缺口_t']:,.1f} tCO₂")
+        print(f"当前碳价: {cost['当前碳价_元每吨']} 元/吨")
+        print(f"近90日均价: {cost.get('近90日均价_元每吨', 'N/A')} 元/吨")
+        print(f"碳价波动率: {cost.get('碳价波动率', 'N/A')}")
+        print(f"\n预估合规成本: {cost['预估合规成本_参考价']:,.0f} 元")
+        print(f"成本区间: {cost['预估合规成本区间_low']:,.0f} ~ {cost['预估合规成本区间_high']:,.0f} 元")
+    elif "盈余量_t" in cost:
+        print(f"盈余量: {cost['盈余量_t']:,.1f} tCO₂")
+        print(f"预估收益: {cost['预估收益_low']:,.0f} ~ {cost['预估收益_high']:,.0f} 元")
+    
+    # === 5. 排放因子对比 ===
+    print("\n" + "=" * 60)
+    print("📈 排放因子数据来源对比")
+    print("=" * 60)
+    
+    comparison = get_factor_comparison()
+    print(f"\n{'车型':<20} {'环境科学2021':>12} {'GB2024':>8} {'GB2018':>8} {'推荐值':>8}")
+    for c in comparison:
+        gb24 = f"{c.get('gb_2024'):>8.3f}" if c.get('gb_2024') else "     N/A"
+        gb18 = f"{c.get('gb_2018'):>8.3f}" if c.get('gb_2018') else "     N/A"
+        print(f"  {c['vehicle_type']:<18} {c['env_science_2021']:>10.3f} {gb24} {gb18} {c['recommended']:>6.3f}")
+    
+    # === 6. 总结 ===
+    print("\n" + "=" * 60)
+    print("📝 企业碳资产总结")
+    print("=" * 60)
+    print(f"""
+企业: 示例物流运输有限公司
+车队: {baseline.total_vehicles} 辆（含{fleet[3].count}辆新能源车）
+年度碳排放: {baseline.total_emission_t:,.1f} tCO₂
+免费配额:   {gap.total_quota_t:,.1f} tCO₂
+配额缺口:   {gap.gap_t:,.1f} tCO₂（{gap.gap_status}）
+预估成本:   {cost.get('预估合规成本_参考价', cost.get('预估收益_low', 0)):,.0f} 元
+
+建议:
+1. {'需购买配额' if gap.gap_t > 0 else '配额盈余可出售'} 
+2. 新能源车已减少排放约{fleet[3].count * 40000 * 0.877 / 1000:.0f} tCO₂/年
+3. 提高满载率可降低单位排放（满载率从70%→75%约减少2%排放）
+4. 建议关注全国碳市场碳价走势，择时购买配额
+""")
+    
+    print("✅ 端到端测试完成")
+
+if __name__ == "__main__":
+    run_e2e_demo()
