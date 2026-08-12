@@ -46,11 +46,11 @@
 - `quota.py` — 配额缺口估算
 - `carbon_price.py` — 碳价参考与成本预测
 
-### RAG政策助手 (`src/rag/`)
+### RAG政策助手 (`src/rag/`) — 自研RAG链路（未使用LangChain）
 - `crawler.py` — 政策文档爬取
 - `parser.py` — 文档解析(PDF/DOCX/HTML) + 清洗 + 切分
-- `vector_store.py` — ChromaDB向量知识库管理
-- `generator.py` — Prompt模板 + LLM调用
+- `vector_store.py` — 向量知识库管理（ChromaDB优先，TF-IDF fallback）
+- `generator.py` — Prompt模板 + LLM调用（含错误处理与降级）
 
 ### API层 (`src/api/`)
 - `main.py` — FastAPI应用入口

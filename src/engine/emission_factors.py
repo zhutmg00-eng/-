@@ -13,18 +13,17 @@ import csv
 from pathlib import Path
 
 # ============================================================
-# 内置排放因子表（当CSV文件不存在时使用）
+# 内置排放因子表（fallback，当CSV文件不存在时使用）
 # 数据已整合GB 30510-2024第四阶段标准
 # ============================================================
-EMISSION_FACTORS: Dict[str, Dict] = {
-    # === 主力车型（中国环境科学2021 + GB 30510-2024交叉验证）===
+BUILTIN_FACTORS: Dict[str, Dict] = {
     "重型柴油货车": {
         "co2_kg_per_km": 0.877,
         "fuel_type": "柴油",
         "fuel_consumption_l_per_100km": 33.0,
         "avg_annual_km": 80000,
         "source": "中国环境科学2021(蔡博峰等)",
-        "gb2024_factor": 0.858,  # GB 30510-2024 第四阶段
+        "gb2024_factor": 0.858,
         "gb2024_note": "GB 30510-2024限值对应的CO2参考值，较第三阶段加严约15%",
     },
     "中型柴油货车": {
@@ -33,7 +32,7 @@ EMISSION_FACTORS: Dict[str, Dict] = {
         "fuel_consumption_l_per_100km": 19.0,
         "avg_annual_km": 50000,
         "source": "中国环境科学2021(蔡博峰等)",
-        "gb2024_factor": 0.536,  # GB 30510-2024 第四阶段(12-16t)
+        "gb2024_factor": 0.536,
     },
     "轻型柴油货车": {
         "co2_kg_per_km": 0.374,
@@ -41,7 +40,7 @@ EMISSION_FACTORS: Dict[str, Dict] = {
         "fuel_consumption_l_per_100km": 12.0,
         "avg_annual_km": 30000,
         "source": "中国环境科学2021(蔡博峰等)",
-        "gb2024_factor": 0.257,  # GB 30510-2024 第四阶段(3.5-4.5t)
+        "gb2024_factor": 0.257,
     },
     "微型汽油货车": {
         "co2_kg_per_km": 0.216,
@@ -49,7 +48,7 @@ EMISSION_FACTORS: Dict[str, Dict] = {
         "fuel_consumption_l_per_100km": 8.0,
         "avg_annual_km": 20000,
         "source": "中国环境科学2021(蔡博峰等)",
-        "gb2024_factor": 0.282,  # GB 30510-2024 第四阶段(3.5-4.5t汽油)
+        "gb2024_factor": 0.282,
     },
     "LNG重型货车": {
         "co2_kg_per_km": 0.72,
@@ -72,32 +71,43 @@ EMISSION_FACTORS: Dict[str, Dict] = {
 # CSV文件路径
 CSV_PATH = Path(__file__).parent.parent.parent / "data" / "raw" / "emission_factors.csv"
 
+# 运行时排放因子表（优先从CSV加载，回退到内置）
+EMISSION_FACTORS: Dict[str, Dict] = {}
 
-def load_from_csv() -> Dict[str, Dict]:
-    """从CSV文件加载排放因子（如果存在）"""
-    if not CSV_PATH.exists():
-        return EMISSION_FACTORS
 
-    factors = {}
-    with open(CSV_PATH, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            vtype = row.get("车辆类型", "").strip()
-            if not vtype:
-                continue
-            factors[vtype] = {
-                "co2_kg_per_km": float(row.get("CO2排放因子(kg/km)", 0)),
-                "fuel_type": row.get("燃料类型", ""),
-                "fuel_consumption_l_per_100km": float(row["油耗(L/100km)"]) if row.get("油耗(L/100km)") else None,
-                "avg_annual_km": int(row.get("年均里程参考(km)", 0)) or None,
-                "source": row.get("数据来源", ""),
-            }
-    return factors if factors else EMISSION_FACTORS
+def _load_factors() -> Dict[str, Dict]:
+    """加载排放因子：优先CSV，回退到内置表"""
+    if CSV_PATH.exists():
+        factors = {}
+        try:
+            with open(CSV_PATH, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    vtype = row.get("车辆类型", "").strip()
+                    if not vtype:
+                        continue
+                    factors[vtype] = {
+                        "co2_kg_per_km": float(row.get("CO2排放因子(kg/km)", 0)),
+                        "fuel_type": row.get("燃料类型", ""),
+                        "fuel_consumption_l_per_100km": float(row["油耗(L/100km)"]) if row.get("油耗(L/100km)") else None,
+                        "avg_annual_km": int(row.get("年均里程参考(km)", 0)) or None,
+                        "source": row.get("数据来源", ""),
+                    }
+            if factors:
+                return factors
+        except Exception as e:
+            print(f"⚠️ 加载CSV排放因子失败: {e}，使用内置数据")
+    return BUILTIN_FACTORS.copy()
+
+
+# 模块加载时初始化
+EMISSION_FACTORS = _load_factors()
 
 
 def get_emission_factor(vehicle_type: str) -> Optional[Dict]:
-    """获取指定车型的排放因子"""
-    return EMISSION_FACTORS.get(vehicle_type)
+    """获取指定车型的排放因子（返回副本，防止污染全局数据）"""
+    factor = EMISSION_FACTORS.get(vehicle_type)
+    return dict(factor) if factor else None
 
 
 def list_vehicle_types() -> list:
@@ -106,8 +116,8 @@ def list_vehicle_types() -> list:
 
 
 def get_all_factors() -> Dict[str, Dict]:
-    """获取全部排放因子"""
-    return EMISSION_FACTORS
+    """获取全部排放因子（返回副本）"""
+    return {k: dict(v) for k, v in EMISSION_FACTORS.items()}
 
 
 def get_factor_comparison() -> list:

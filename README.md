@@ -52,4 +52,4 @@ carbon-asset-assistant/
 
 ## 技术栈
 
-Python 3.10+ · FastAPI · Streamlit · LangChain · ChromaDB · Pandas · Plotly
+Python 3.10+ · FastAPI · Streamlit · ChromaDB · Pydantic · PyMuPDF

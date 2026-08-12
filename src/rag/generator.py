@@ -1,5 +1,11 @@
-"""LLM调用与Prompt模板引擎"""
-from typing import List, Dict
+"""LLM调用与Prompt模板引擎
+
+支持错误处理：
+- API key缺失 → 返回提示信息
+- API超时/限流 → 重试1次后降级
+- 其他异常 → 返回错误信息
+"""
+from typing import List, Dict, Optional
 from src.config import LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, get_llm_config
 
 # ============================================================
@@ -77,26 +83,72 @@ def call_llm(
     调用大语言模型API
 
     支持的模型：deepseek-chat / qwen-turbo / glm-4-flash
-    """
-    from openai import OpenAI
 
+    错误处理：
+    - API key未配置 → 返回降级提示
+    - 网络超时/限流 → 重试1次
+    - 其他异常 → 返回错误信息
+    """
     model = model or LLM_MODEL
     temperature = temperature if temperature is not None else LLM_TEMPERATURE
     config = get_llm_config(model)
 
-    client = OpenAI(
-        api_key=config["api_key"],
-        base_url=config["base_url"],
-    )
+    # 检查API key
+    api_key = config.get("api_key", "")
+    if not api_key:
+        return (
+            "⚠️ LLM API密钥未配置，无法调用大模型生成回答。\n"
+            "请在 .env 文件中设置对应的API key（如 DEEPSEEK_API_KEY）。\n\n"
+            "以下是基于检索结果的关键政策条款摘要：\n"
+            f"{user_prompt[:500]}..."
+        )
 
-    response = client.chat.completions.create(
-        model=config["model"],
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=temperature,
-        max_tokens=LLM_MAX_TOKENS,
-    )
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "⚠️ openai包未安装，请运行 pip install openai"
 
-    return response.choices[0].message.content
+    client = OpenAI(api_key=api_key, base_url=config["base_url"])
+
+    # 重试逻辑（最多2次）
+    max_retries = 2
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=config["model"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=LLM_MAX_TOKENS,
+                timeout=30,  # 30秒超时
+            )
+            return response.choices[0].message.content
+
+        except Exception as e:
+            last_error = e
+            error_type = type(e).__name__
+
+            # 限流/超时 → 重试
+            if "rate" in str(e).lower() or "timeout" in str(e).lower():
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(2 ** attempt)  # 指数退避
+                    continue
+
+            # 认证错误 → 不重试
+            if "auth" in str(e).lower() or "401" in str(e):
+                return f"⚠️ API认证失败，请检查API key配置: {error_type}"
+
+            # 其他错误
+            break
+
+    return (
+        f"⚠️ LLM调用失败: {last_error}\n"
+        "请检查API key配置和网络连接。\n\n"
+        "以下是基于检索结果的关键政策条款摘要：\n"
+        f"{user_prompt[:500]}..."
+    )
