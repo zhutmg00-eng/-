@@ -1,0 +1,80 @@
+{
+  "download_date": "2026-08-12",
+  "total_docs": 8,
+  "success": 7,
+  "failed": 1,
+  "docs": [
+    {
+      "filename": "国家温室气体排放因子数据库_第二版公告.md",
+      "title": "国家温室气体排放因子数据库（第二版）正式发布",
+      "url": "https://www.mee.gov.cn/ywgz/ydqhbh/wsqtkz/202603/t20260301_1145117.shtml",
+      "description": "国家温室气体排放因子数据库第二版，576个因子",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/国家温室气体排放因子数据库_第二版公告.md",
+      "char_count": 522,
+      "status": "ok"
+    },
+    {
+      "filename": "2023年电力二氧化碳排放因子公告.md",
+      "title": "关于发布2023年电力二氧化碳排放因子的公告",
+      "url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk01/202512/t20251231_1139517.html",
+      "description": "2023年电力CO2排放因子，用于新能源车间接排放估算",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/2023年电力二氧化碳排放因子公告.md",
+      "char_count": 823,
+      "status": "ok"
+    },
+    {
+      "filename": "2026年全国碳市场工作通知.md",
+      "title": "关于做好2026年全国碳排放权交易市场有关工作的通知",
+      "url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk06/202602/t20260209_1143900.html",
+      "description": "2026年全国碳市场管理工作通知，比2025年版更新",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/2026年全国碳市场工作通知.md",
+      "char_count": 3689,
+      "status": "ok"
+    },
+    {
+      "filename": "产品碳足迹管理体系建设进展报告_2026.md",
+      "title": "产品碳足迹管理体系建设进展报告（2026）",
+      "url": "https://www.mee.gov.cn/ywgz/ydqhbh/wsqtkz/202606/t20260617_1159517.shtml",
+      "description": "2026年产品碳足迹报告",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/产品碳足迹管理体系建设进展报告_2026.md",
+      "char_count": 209,
+      "status": "ok"
+    },
+    {
+      "filename": "核算指南更新技术要求通知.md",
+      "title": "关于更新《企业温室气体排放核算与报告指南 发电设施》和《企业温室气体排放核查技术指南 发电设施》有关技术要求的通知",
+      "url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk06/202606/t20260629_1160473.html",
+      "description": "发电设施核算指南和核查指南更新通知",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/核算指南更新技术要求通知.md",
+      "char_count": 1213,
+      "status": "ok"
+    },
+    {
+      "filename": "省级温室气体清单编制指南_2025版.md",
+      "title": "关于印发《省级温室气体清单编制指南（2025年版）》的通知",
+      "url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk05/202601/t20260104_1139798.html",
+      "description": "省级温室气体清单编制指南2025年版",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/省级温室气体清单编制指南_2025版.md",
+      "char_count": 655,
+      "status": "ok"
+    },
+    {
+      "filename": "2025年全国碳市场运行情况.md",
+      "title": "2025年全国碳市场平稳有序运行 圆满完成年度建设工作",
+      "url": "https://www.mee.gov.cn/ywgz/ydqhbh/wsqtkz/202601/t20260101_1139528.shtml",
+      "description": "2025年全国碳市场年度运行总结",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/2025年全国碳市场运行情况.md",
+      "char_count": 1012,
+      "status": "ok"
+    },
+    {
+      "filename": "CCER方法学_煤矿低浓度瓦斯.md",
+      "title": "CCER方法学_煤矿低浓度瓦斯（404）",
+      "url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk06/202501/t20250103_1146856.html",
+      "description": "CCER煤矿瓦斯方法学（如有）",
+      "filepath": "/home/node/.openclaw/workspace/carbon-asset-assistant/data/policy_docs/CCER方法学_煤矿低浓度瓦斯.md",
+      "char_count": 370,
+      "status": "404"
+    }
+  ]
+}
