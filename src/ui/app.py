@@ -1,5 +1,6 @@
 """Streamlit 主入口"""
 import streamlit as st
+from pathlib import Path
 
 st.set_page_config(
     page_title="碳资产管理与合规决策助手",
@@ -12,7 +13,7 @@ st.caption("面向物流运输企业 · 碳排放基线测算 + 碳交易政策�
 
 page = st.sidebar.radio(
     "功能导航",
-    ["🏠 首页", "📊 碳资产盘点", "💬 政策顾问", "📋 排放因子表", "📄 生成报告"],
+    ["🏠 首页", "📊 碳资产盘点", "💬 政策顾问", "📋 排放因子表", "📄 生成报告", "🔬 减排分析"],
 )
 
 if page == "🏠 首页":
@@ -158,7 +159,247 @@ elif page == "📄 生成报告":
     if result:
         st.write("当前计算结果已缓存，可导出为PDF报告")
         st.json(result)
-        if st.button("📥 导出PDF报告"):
-            st.info("PDF导出功能开发中，请手动保存上方数据")
+        if st.button("📥 导出PDF报告", type="primary"):
+            try:
+                from src.ui.components.report import generate_carbon_report
+                company_name = st.session_state.get("company_name", "示例物流公司")
+                emission_by_type = result.get("emission_by_type", {})
+                total_emission = result.get("total_emission_t", 0)
+                total_vehicles = result.get("total_vehicles", 0)
+                quota_gap = result.get("quota_gap", {})
+                compliance_cost = result.get("compliance_cost", {})
+
+                # 获取政策顾问的 llm_answer（如果存在）
+                llm_answer = ""
+                if "messages" in st.session_state:
+                    for msg in st.session_state.messages:
+                        if msg["role"] == "assistant":
+                            llm_answer = msg["content"]  # 取最近一条
+
+                report_path = generate_carbon_report(
+                    company_name=company_name,
+                    total_emission_t=total_emission,
+                    total_vehicles=total_vehicles,
+                    emission_by_type=emission_by_type,
+                    total_quota_t=quota_gap.get("配额_t", 0),
+                    gap_t=quota_gap.get("缺口_t", 0),
+                    gap_status=quota_gap.get("状态", "未知"),
+                    compliance_cost=compliance_cost,
+                    llm_answer=llm_answer,
+                )
+                st.success(f"✅ 报告已保存：`{report_path}`")
+                st.write(f"**报告路径：** `{report_path}`")
+
+                # PDF 下载按钮
+                with open(report_path, "rb") as f:
+                    pdf_bytes = f.read()
+                st.download_button(
+                    label="📥 下载 PDF 报告",
+                    data=pdf_bytes,
+                    file_name=Path(report_path).name,
+                    mime="application/pdf",
+                )
+            except Exception as e:
+                st.error(f"生成报告失败：{e}")
     else:
         st.info("请先在'碳资产盘点'页面进行计算")
+
+# ============================================================
+# 🔬 减排分析
+# ============================================================
+elif page == "🔬 减排分析":
+    st.header("🔬 减排情景分析")
+    st.caption("模拟不同减排措施对排放和配额的影响")
+
+    carbon_result = st.session_state.get("carbon_result")
+    fleet_data = st.session_state.get("fleet_data", [])
+
+    if not carbon_result or not fleet_data:
+        st.info("请先在'碳资产盘点'页面添加车型并计算排放量")
+    else:
+        # 显示基线
+        total_emission = carbon_result.get("total_emission_t", 0)
+        total_vehicles = carbon_result.get("total_vehicles", 0)
+        quota_gap = carbon_result.get("quota_gap", {})
+        compliance_cost = carbon_result.get("compliance_cost", {})
+
+        st.subheader("📊 当前排放基线")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("年度碳排放", f"{total_emission:,.0f} tCO₂")
+        col2.metric("总车辆数", f"{total_vehicles} 辆")
+        col3.metric("配额缺口", f"{quota_gap.get('缺口_t', 0):,.0f} tCO₂")
+        col4.metric("缺口状态", quota_gap.get("状态", "未知"))
+
+        st.divider()
+
+        # 减排措施配置
+        st.subheader("⚙️ 减排措施配置")
+
+        # 选择车型和减排方式
+        vehicle_types = list(carbon_result.get("emission_by_type", {}).keys())
+        selected_type = st.selectbox("选择车型", vehicle_types)
+
+        # 获取该车型的车辆数
+        type_info = carbon_result.get("emission_by_type", {}).get(selected_type, {})
+        type_count = type_info.get("车辆数", 0)
+        type_emission = type_info.get("排放量_tCO2", 0)
+        ef = type_info.get("排放因子_kg_per_km", 0)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            replace_count = st.slider(
+                "替换为新能源车数量",
+                min_value=0,
+                max_value=int(type_count),
+                value=0,
+                step=1,
+            )
+        with col_b:
+            replace_load = st.slider(
+                "提升满载率车辆数",
+                min_value=0,
+                max_value=int(type_count),
+                value=0,
+                step=1,
+            )
+
+        # 满载率目标
+        current_load = 0.75
+        if fleet_data:
+            for fd in fleet_data:
+                if fd["vehicle_type"] == selected_type:
+                    current_load = fd.get("load_factor", 0.75)
+                    break
+
+        target_load = st.slider(
+            "目标满载率",
+            min_value=0.50,
+            max_value=1.00,
+            value=max(current_load, 0.80),
+            step=0.05,
+            help="提升满载率可降低满载率调整系数，减少排放",)
+
+        st.divider()
+
+        # 计算减排效果
+        if st.button("🚀 计算减排效果", type="primary"):
+            with st.spinner("正在计算减排情景..."):
+                try:
+                    # 尝试导入 reduction 模块
+                    try:
+                        from src.engine.calculator import VehicleGroupData, calculate_emission
+                        from src.engine.quota import estimate_quota_gap
+                        from src.engine.carbon_price import estimate_compliance_cost, load_carbon_price_data
+                        from src.engine import reduction as reduction_module
+                        use_engine = True
+                    except ImportError:
+                        use_engine = False
+
+                    if use_engine:
+                        # 构建基线车队
+                        baseline_fleet = []
+                        for fd in fleet_data:
+                            baseline_fleet.append(VehicleGroupData(
+                                vehicle_type=fd["vehicle_type"],
+                                count=fd["count"],
+                                annual_km=fd["annual_km"],
+                                load_factor=fd["load_factor"],
+                            ))
+
+                        # 构建减排措施
+                        changes = {}
+                        if replace_count > 0:
+                            changes["替换为新能源物流车"] = replace_count
+                        if replace_load > 0:
+                            changes[f"提升满载率至{target_load}"] = replace_load
+
+                        if changes:
+                            scenario_result = reduction_module.analyze_reduction_scenario(
+                                baseline_fleet=baseline_fleet,
+                                changes=changes,
+                            )
+                            scenario_dict = scenario_result.to_dict()
+                        else:
+                            scenario_dict = {
+                                "baseline_emission": total_emission,
+                                "scenario_emission": total_emission,
+                                "reduction_t": 0,
+                                "reduction_pct": 0,
+                                "cost_savings": {},
+                                "recommendations": ["请配置减排措施后重新计算"],
+                            }
+                    else:
+                        # 回退：基于排放因子直接计算
+                        from src.engine.emission_factors import get_emission_factor
+
+                        baseline_emission = total_emission
+                        reduction = 0.0
+
+                        if replace_count > 0 and ef > 0:
+                            # 替换为新能源：减排量 = 车辆数 × 年均里程 × 排放因子 / 1000
+                            # 获取该车种的年均里程
+                            avg_km = fd.get("annual_km", 80000) if fleet_data else 80000
+                            # 查找该车型的年均里程
+                            for f in fleet_data:
+                                if f["vehicle_type"] == selected_type:
+                                    avg_km = f["annual_km"]
+                                    break
+                            reduction += replace_count * avg_km * ef / 1000
+
+                        if replace_load > 0 and current_load < target_load:
+                            # 提升满载率带来的减排
+                            from src.engine.calculator import calculate_load_adjustment
+                            old_adj = calculate_load_adjustment(current_load)
+                            new_adj = calculate_load_adjustment(target_load)
+                            # 获取年均里程
+                            avg_km = 80000
+                            for f in fleet_data:
+                                if f["vehicle_type"] == selected_type:
+                                    avg_km = f["annual_km"]
+                                    break
+                            load_reduction = replace_count * avg_km * ef * (old_adj - new_adj) / 1000
+                            reduction += max(0, load_reduction)
+
+                        scenario_emission = max(0, baseline_emission - reduction)
+                        reduction_pct = round(reduction / baseline_emission * 100, 2) if baseline_emission > 0 else 0
+
+                        # 估算成本节省
+                        current_cost = compliance_cost.get("预估合规成本_参考价", 0)
+                        saved_cost = round(current_cost * (reduction_pct / 100), 2) if current_cost > 0 and reduction_pct > 0 else 0
+
+                        scenario_dict = {
+                            "baseline_emission": round(baseline_emission, 2),
+                            "scenario_emission": round(scenario_emission, 2),
+                            "reduction_t": round(reduction, 2),
+                            "reduction_pct": reduction_pct,
+                            "cost_savings": {
+                                "基线合规成本_元": current_cost,
+                                "情景合规成本_元": round(current_cost - saved_cost, 2),
+                                "节省_元": saved_cost,
+                            },
+                            "recommendations": [
+                                f"✅ 替换 {replace_count} 辆{selected_type}为新能源车，减排 {reduction:,.0f} tCO₂",
+                            ] + ([
+                                f"✅ 提升 {replace_load} 辆{selected_type}满载率从{current_load:.0%}至{target_load:.0%}，额外减排 {max(0,load_reduction):,.0f} tCO₂",
+                            ] if replace_load > 0 and current_load < target_load else []),
+                        }
+
+                    # 展示结果
+                    st.subheader("📈 减排情景结果")
+                    r = scenario_dict
+
+                    col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+                    col_r1.metric("情景排放量", f"{r.get('scenario_emission', 0):,.0f} tCO₂")
+                    col_r2.metric("减排量", f"{r.get('reduction_t', 0):,.0f} tCO₂")
+                    col_r3.metric("减排比例", f"{r.get('reduction_pct', 0):.1f}%")
+                    col_r4.metric("成本节省", f"{r.get('cost_savings', {}).get('节省_元', 0):,.0f} 元")
+
+                    st.divider()
+                    st.subheader("💡 减排建议")
+                    for rec in r.get("recommendations", []):
+                        st.write(rec)
+
+                except Exception as e:
+                    st.error(f"计算减排效果失败：{e}")
+                    import traceback
+                    st.code(traceback.format_exc())

@@ -1,0 +1,51 @@
+# ============================================================
+# 碳资产助手 — Docker Compose（开发环境）
+#
+# 一键启动：docker compose up -d
+# ============================================================
+
+services:
+  # ---- FastAPI API服务 ----
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: carbon-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src  # 开发热重载
+    environment:
+      - CORS_ORIGINS=http://localhost:8501,http://localhost:3000
+      - APP_API_KEY=dev-key  # 开发模式密钥
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ---- Streamlit Web UI ----
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: carbon-web
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src  # 开发热重载
+    environment:
+      - API_BASE_URL=http://api:8000
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  data:

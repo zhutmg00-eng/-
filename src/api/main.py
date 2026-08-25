@@ -20,6 +20,12 @@ app = FastAPI(
 )
 
 # ============================================================
+# 注册路由
+# ============================================================
+from src.api.routes_compare import router as compare_router
+app.include_router(compare_router)
+
+# ============================================================
 # CORS配置（可通过环境变量配置允许的来源）
 # ============================================================
 ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:8501,http://localhost:3000").split(",")

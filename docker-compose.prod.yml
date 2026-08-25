@@ -1,0 +1,25 @@
+# ============================================================
+# 碳资产助手 — Docker Compose（生产环境 / 内网穿透）
+#
+# 覆盖配置：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================================
+
+services:
+  api:
+    ports:
+      - "0.0.0.0:8000:8000"  # 绑定所有网卡
+    environment:
+      # 允许所有来源（内网穿透场景）
+      - CORS_ORIGINS=*
+      # API Key（生产环境必须设置）
+      - APP_API_KEY=${APP_API_KEY:-}
+      # 生产环境日志
+      - LOG_LEVEL=info
+
+  web:
+    ports:
+      - "0.0.0.0:8501:8501"  # 绑定所有网卡
+    environment:
+      - API_BASE_URL=http://api:8000
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_ENABLE_XSrf_PROTECTION=false
