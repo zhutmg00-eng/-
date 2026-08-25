@@ -79,15 +79,29 @@ def calculate_emission(fleet: List[VehicleGroupData]) -> CarbonBaselineResult:
             / 1000
         )
 
-        emission_by_type[group.vehicle_type] = {
-            "排放量_tCO2": round(group_emission, 2),
-            "占比": 0.0,  # 稍后计算
-            "车辆数": group.count,
-            "单辆排放_tCO2": round(group_emission / group.count, 2) if group.count else 0,
-            "排放因子_kg_per_km": ef["co2_kg_per_km"],
-            "满载率调整系数": round(load_adjustment, 4),
-            "燃料类型": ef["fuel_type"],
-        }
+        if group.vehicle_type in emission_by_type:
+            prev = emission_by_type[group.vehicle_type]
+            new_emission = prev["排放量_tCO2"] + round(group_emission, 2)
+            new_count = prev["车辆数"] + group.count
+            emission_by_type[group.vehicle_type] = {
+                "排放量_tCO2": round(new_emission, 2),
+                "占比": 0.0,
+                "车辆数": new_count,
+                "单辆排放_tCO2": round(new_emission / new_count, 2) if new_count else 0,
+                "排放因子_kg_per_km": ef["co2_kg_per_km"],
+                "满载率调整系数": round(load_adjustment, 4),
+                "燃料类型": ef["fuel_type"],
+            }
+        else:
+            emission_by_type[group.vehicle_type] = {
+                "排放量_tCO2": round(group_emission, 2),
+                "占比": 0.0,  # 稍后计算
+                "车辆数": group.count,
+                "单辆排放_tCO2": round(group_emission / group.count, 2) if group.count else 0,
+                "排放因子_kg_per_km": ef["co2_kg_per_km"],
+                "满载率调整系数": round(load_adjustment, 4),
+                "燃料类型": ef["fuel_type"],
+            }
 
         total_emission += group_emission
         total_vehicles += group.count

@@ -113,6 +113,37 @@ def chunk_policy_text(
     current_chunk = ""
 
     for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        # 单个段落超过 chunk_size 时进行分片切分
+        if len(para) > chunk_size:
+            if current_chunk:
+                chunks.append({
+                    "text": current_chunk.strip(),
+                    "metadata": {
+                        "source": doc_source,
+                        "date": doc_date,
+                    },
+                })
+                current_chunk = ""
+            start = 0
+            while start < len(para):
+                end = start + chunk_size
+                slice_text = para[start:end]
+                chunks.append({
+                    "text": slice_text.strip(),
+                    "metadata": {
+                        "source": doc_source,
+                        "date": doc_date,
+                    },
+                })
+                if end >= len(para):
+                    break
+                start += max(1, chunk_size - overlap)
+            continue
+
         if len(current_chunk) + len(para) > chunk_size:
             if current_chunk:
                 chunks.append({

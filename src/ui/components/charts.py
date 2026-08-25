@@ -51,7 +51,7 @@ def plot_emission_pie(emission_by_type: dict) -> go.Figure:
             values=values,
             hole=0.55,
             marker=dict(colors=GREEN_PALETTE),
-            textposition="center",
+            textposition="inside",
             textinfo="percent",
             hoverinfo="label+value+percent",
         )

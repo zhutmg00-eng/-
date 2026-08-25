@@ -19,11 +19,6 @@ app = FastAPI(
     description="面向物流企业的碳资产管理工具",
 )
 
-# ============================================================
-# 注册路由
-# ============================================================
-from src.api.routes_compare import router as compare_router
-app.include_router(compare_router)
 
 # ============================================================
 # CORS配置（可通过环境变量配置允许的来源）
@@ -60,12 +55,19 @@ def safe_resolve_path(file_path: str, base_dir: Path) -> Path:
     base_dir = base_dir.resolve()
     requested = Path(file_path).resolve()
     # 确保解析后的路径在base_dir内
-    if not str(requested).startswith(str(base_dir)):
+    if not requested.is_relative_to(base_dir):
         raise HTTPException(
             status_code=403,
             detail=f"Access denied: path must be within {base_dir}"
         )
     return requested
+
+
+# ============================================================
+# 注册路由
+# ============================================================
+from src.api.routes_compare import router as compare_router
+app.include_router(compare_router)
 
 
 # ========== 数据模型 ==========

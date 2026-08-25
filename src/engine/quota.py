@@ -80,7 +80,7 @@ def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapRe
 
     gap = emission_total - total_quota
 
-    if abs(gap) < emission_total * 0.01:  # 差距小于1%视为平衡
+    if (emission_total <= 0 and total_quota <= 0) or abs(gap) < max(emission_total * 0.01, 1e-6):
         status = "平衡"
     elif gap > 0:
         status = "缺口"

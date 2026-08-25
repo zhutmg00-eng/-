@@ -52,6 +52,7 @@ class ReductionAnalysis:
         reduction_pct: 减排百分比 (%)
         cost_savings: 合规成本节省详情
         recommendations: 具体建议列表
+        name: 情景名称（可选）
     """
     baseline_emission: float
     scenario_emission: float
@@ -59,10 +60,12 @@ class ReductionAnalysis:
     reduction_pct: float
     cost_savings: dict
     recommendations: list = field(default_factory=list)
+    name: str = ""
 
     def to_dict(self) -> dict:
         """序列化为字典，供API返回"""
         return {
+            "name": self.name,
             "baseline_emission": self.baseline_emission,
             "scenario_emission": self.scenario_emission,
             "reduction_t": self.reduction_t,
@@ -91,8 +94,6 @@ REPLACEMENT_MAP = {
     "中型柴油货车": ("新能源物流车", 0.508),       # 0.508 - 0.0 = 0.508
     "轻型柴油货车": ("新能源物流车", 0.374),       # 0.374 - 0.0 = 0.374
     "微型汽油货车": ("新能源物流车", 0.216),       # 0.216 - 0.0 = 0.216
-    "重型柴油货车": ("LNG重型货车", 0.157),        # 0.877 - 0.72 = 0.157
-    "中型柴油货车": ("LNG重型货车", 0.212),        # 0.508 - 0.72 → 负值，不合理，实际用新能源
 }
 
 # 各车型年均里程参考（用于计算减排量）
@@ -121,118 +122,103 @@ def _build_scenario_fleet(baseline_fleet: List[VehicleGroupData], changes: dict)
     Returns:
         情景车队（VehicleGroupData列表）
     """
-    # 复制基线车队
-    scenario_fleet = []
-    remaining_counts = {g.vehicle_type: g.count for g in baseline_fleet}
+    current_fleet = [
+        VehicleGroupData(
+            vehicle_type=g.vehicle_type,
+            count=g.count,
+            annual_km=g.annual_km,
+            load_factor=g.load_factor,
+        )
+        for g in baseline_fleet
+        if g.count > 0
+    ]
 
-    # 处理每种减排措施
     for measure, count in changes.items():
-        if "替换为新能源物流车" in measure or "更换为新能源" in measure:
-            # 找到剩余车辆中排放最高的车型，优先替换
-            for base_group in baseline_fleet:
-                if remaining_counts.get(base_group.vehicle_type, 0) <= 0:
-                    continue
-                replace_count = min(count, remaining_counts[base_group.vehicle_type])
-                remaining_counts[base_group.vehicle_type] -= replace_count
+        if count <= 0:
+            continue
 
-                # 保留剩余的原车型
-                if replace_count < base_group.count:
-                    scenario_fleet.append(VehicleGroupData(
-                        vehicle_type=base_group.vehicle_type,
-                        count=base_group.count - replace_count,
-                        annual_km=base_group.annual_km,
-                        load_factor=base_group.load_factor,
+        if "替换为新能源物流车" in measure or "更换为新能源" in measure or "新能源" in measure:
+            remaining_to_replace = count
+            new_fleet = []
+            for g in current_fleet:
+                if remaining_to_replace > 0 and g.vehicle_type != "新能源物流车":
+                    replace_num = min(remaining_to_replace, g.count)
+                    remaining_to_replace -= replace_num
+                    if g.count > replace_num:
+                        new_fleet.append(VehicleGroupData(
+                            vehicle_type=g.vehicle_type,
+                            count=g.count - replace_num,
+                            annual_km=g.annual_km,
+                            load_factor=g.load_factor,
+                        ))
+                    new_fleet.append(VehicleGroupData(
+                        vehicle_type="新能源物流车",
+                        count=replace_num,
+                        annual_km=g.annual_km,
+                        load_factor=g.load_factor,
                     ))
+                else:
+                    new_fleet.append(g)
+            current_fleet = new_fleet
 
-                # 添加新能源替代车型（年均里程保持一致）
-                scenario_fleet.append(VehicleGroupData(
-                    vehicle_type="新能源物流车",
-                    count=replace_count,
-                    annual_km=base_group.annual_km,
-                    load_factor=base_group.load_factor,
-                ))
-                count -= replace_count
-                if count <= 0:
-                    break
-
-        elif "更换LNG" in measure or "更换为LNG" in measure:
-            # 将柴油车型替换为LNG
-            for base_group in baseline_fleet:
-                if "柴油" not in base_group.vehicle_type:
-                    continue
-                if remaining_counts.get(base_group.vehicle_type, 0) <= 0:
-                    continue
-                replace_count = min(count, remaining_counts[base_group.vehicle_type])
-                remaining_counts[base_group.vehicle_type] -= replace_count
-
-                if replace_count < base_group.count:
-                    scenario_fleet.append(VehicleGroupData(
-                        vehicle_type=base_group.vehicle_type,
-                        count=base_group.count - replace_count,
-                        annual_km=base_group.annual_km,
-                        load_factor=base_group.load_factor,
+        elif "更换LNG" in measure or "更换为LNG" in measure or "LNG" in measure:
+            remaining_to_replace = count
+            new_fleet = []
+            for g in current_fleet:
+                if remaining_to_replace > 0 and "柴油" in g.vehicle_type:
+                    replace_num = min(remaining_to_replace, g.count)
+                    remaining_to_replace -= replace_num
+                    if g.count > replace_num:
+                        new_fleet.append(VehicleGroupData(
+                            vehicle_type=g.vehicle_type,
+                            count=g.count - replace_num,
+                            annual_km=g.annual_km,
+                            load_factor=g.load_factor,
+                        ))
+                    new_fleet.append(VehicleGroupData(
+                        vehicle_type="LNG重型货车",
+                        count=replace_num,
+                        annual_km=g.annual_km,
+                        load_factor=g.load_factor,
                     ))
+                else:
+                    new_fleet.append(g)
+            current_fleet = new_fleet
 
-                scenario_fleet.append(VehicleGroupData(
-                    vehicle_type="LNG重型货车",
-                    count=replace_count,
-                    annual_km=base_group.annual_km,
-                    load_factor=base_group.load_factor,
-                ))
-                count -= replace_count
-                if count <= 0:
-                    break
-
-        elif "提升满载率" in measure:
-            # 提升满载率：不涉及车型替换，只调整满载率
-            target_rate = 0.75  # 默认目标
-            # 从措施名称中提取目标满载率
+        elif "提升满载率" in measure or "满载率" in measure:
+            target_rate = 0.80
             if "至" in measure:
                 try:
-                    target_rate = float(measure.split("至")[-1].strip().rstrip("%")) / 100
+                    target_rate = float(measure.split("至")[-1].strip().rstrip("%"))
+                    if target_rate > 1.0:
+                        target_rate /= 100.0
                 except ValueError:
-                    pass
+                    target_rate = 0.80
 
-            target_count = count  # 涉及车辆数
-            for base_group in baseline_fleet:
-                if remaining_counts.get(base_group.vehicle_type, 0) <= 0:
-                    continue
-                adjust_count = min(target_count, remaining_counts[base_group.vehicle_type])
-                remaining_counts[base_group.vehicle_type] -= adjust_count
+            remaining_to_adjust = count
+            new_fleet = []
+            for g in current_fleet:
+                if remaining_to_adjust > 0 and g.load_factor < target_rate:
+                    adjust_num = min(remaining_to_adjust, g.count)
+                    remaining_to_adjust -= adjust_num
+                    if g.count > adjust_num:
+                        new_fleet.append(VehicleGroupData(
+                            vehicle_type=g.vehicle_type,
+                            count=g.count - adjust_num,
+                            annual_km=g.annual_km,
+                            load_factor=g.load_factor,
+                        ))
+                    new_fleet.append(VehicleGroupData(
+                        vehicle_type=g.vehicle_type,
+                        count=adjust_num,
+                        annual_km=g.annual_km,
+                        load_factor=target_rate,
+                    ))
+                else:
+                    new_fleet.append(g)
+            current_fleet = new_fleet
 
-                # 原满载率保留的车辆
-                scenario_fleet.append(VehicleGroupData(
-                    vehicle_type=base_group.vehicle_type,
-                    count=base_group.count - adjust_count,
-                    annual_km=base_group.annual_km,
-                    load_factor=base_group.load_factor,
-                ))
-                # 提升到目标满载率的车辆
-                scenario_fleet.append(VehicleGroupData(
-                    vehicle_type=base_group.vehicle_type,
-                    count=adjust_count,
-                    annual_km=base_group.annual_km,
-                    load_factor=target_rate,
-                ))
-                target_count -= adjust_count
-                if target_count <= 0:
-                    break
-
-        else:
-            # 未知措施，跳过并记录
-            pass
-
-    # 添加未受影响的车辆
-    for base_group in baseline_fleet:
-        if remaining_counts.get(base_group.vehicle_type, 0) > 0:
-            scenario_fleet.append(VehicleGroupData(
-                vehicle_type=base_group.vehicle_type,
-                count=remaining_counts[base_group.vehicle_type],
-                annual_km=base_group.annual_km,
-                load_factor=base_group.load_factor,
-            ))
-
-    return scenario_fleet
+    return [g for g in current_fleet if g.count > 0]
 
 
 def analyze_reduction_scenario(

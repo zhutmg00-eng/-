@@ -32,7 +32,7 @@ class CompareRequest(BaseModel):
     """多企业对比请求"""
     companies: List[CompareFleetInput] = Field(
         ...,
-        min_items=2,
+        min_length=2,
         description="至少2个企业车队数据"
     )
 
