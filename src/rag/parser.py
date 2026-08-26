@@ -46,11 +46,8 @@ _NAVIGATION_LINE = re.compile(
 
 def parse_pdf(file_path: Path) -> str:
     """解析PDF文档为纯文本"""
-    doc = fitz.open(file_path)
-    text_parts = []
-    for page in doc:
-        text_parts.append(page.get_text())
-    doc.close()
+    with fitz.open(file_path) as doc:
+        text_parts = [page.get_text() for page in doc]
     return "\n".join(text_parts)
 
 

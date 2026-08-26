@@ -15,7 +15,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 from src.engine.calculator import VehicleGroupData, calculate_emission, calculate_load_adjustment
-from src.engine.quota import estimate_quota_gap
+from src.engine.quota import DEFAULT_SCENARIO_REDUCTION_TARGET, estimate_quota_gap
 from src.engine.carbon_price import estimate_compliance_cost, load_carbon_price_data
 
 
@@ -224,6 +224,7 @@ def _build_scenario_fleet(baseline_fleet: List[VehicleGroupData], changes: dict)
 def analyze_reduction_scenario(
     baseline_fleet: List[VehicleGroupData],
     changes: dict,
+    budget_reduction_target: float = DEFAULT_SCENARIO_REDUCTION_TARGET,
 ) -> ReductionAnalysis:
     """
     分析单个减排情景
@@ -231,6 +232,7 @@ def analyze_reduction_scenario(
     Args:
         baseline_fleet: 基线车队
         changes: 减排措施 {"措施名称": 涉及车辆数}
+        budget_reduction_target: 模拟预算所用的直接运营减排目标
 
     Returns:
         ReductionAnalysis: 减排分析结果
@@ -259,8 +261,16 @@ def analyze_reduction_scenario(
     for g in scenario_fleet:
         scenario_fleet_summary[g.vehicle_type] = scenario_fleet_summary.get(g.vehicle_type, 0) + g.count
 
-    baseline_gap = estimate_quota_gap(baseline_emission, baseline_fleet_summary)
-    scenario_gap = estimate_quota_gap(scenario_emission, scenario_fleet_summary)
+    baseline_gap = estimate_quota_gap(
+        baseline_emission,
+        baseline_fleet_summary,
+        reduction_target=budget_reduction_target,
+    )
+    scenario_gap = estimate_quota_gap(
+        scenario_emission,
+        scenario_fleet_summary,
+        reduction_target=budget_reduction_target,
+    )
 
     # 估算碳价对标情景成本变化
     price_df = load_carbon_price_data()

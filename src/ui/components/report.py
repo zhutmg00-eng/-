@@ -230,6 +230,7 @@ def generate_carbon_report(
     compliance_cost: dict,
     llm_answer: str = "",
     output_path: str = None,
+    budget_reduction_target: float = 0.10,
 ) -> str:
     """
     生成物流碳排放与减排情景 PDF 报告。
@@ -245,6 +246,7 @@ def generate_carbon_report(
         compliance_cost: 碳价对标情景估算 dict（参数名为兼容旧调用保留）
         llm_answer: 政策建议（可选）
         output_path: 输出路径（可选）
+        budget_reduction_target: 模拟预算相对参考活动排放的减排目标
 
     Returns:
         生成的 PDF 文件路径
@@ -312,6 +314,7 @@ def generate_carbon_report(
         ["年度直接运营排放", f"{_fmt_number(total_emission_t)} tCO2e"],
         ["总车辆数", f"{total_vehicles} 辆"],
         ["模拟碳预算", f"{_fmt_number(total_quota_t)} tCO2e"],
+        ["情景减排目标", f"{budget_reduction_target:.0%}"],
         ["预算差额", f"{_fmt_number(gap_t)} tCO2e（{gap_status}）"],
     ]
 
@@ -428,14 +431,16 @@ def generate_carbon_report(
         fleet_summary[vtype] = info.get("车辆数", 0)
 
     # 配额基准值
-    from src.engine.quota import QUOTA_BENCHMARK
+    from src.engine.quota import build_simulation_budget_benchmarks
+    budget_benchmarks = build_simulation_budget_benchmarks(budget_reduction_target)
     quota_detail_data = [["车型", "车辆数", "预算基准", "模拟预算", "直接排放", "预算差额"]]
     for vtype, info in emission_by_type.items():
         count = info.get("车辆数", 0)
-        benchmark = QUOTA_BENCHMARK.get(vtype, 0)
+        benchmark = budget_benchmarks.get(vtype, 0)
         type_quota = count * benchmark
         type_emission = info.get("排放量_tCO2", 0)
-        diff = type_quota - type_emission
+        # 与全局 Gap = E - B 保持一致：正值表示超出模拟预算。
+        diff = type_emission - type_quota
         quota_detail_data.append([
             vtype,
             str(count),

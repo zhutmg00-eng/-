@@ -61,7 +61,7 @@ def run_e2e_demo():
     print(f"\n分车型模拟预算明细:")
     print(f"{'车型':<16} {'车辆数':>6} {'基准值':>8} {'预算(t)':>10}")
     for vtype, data in gap.quota_by_type.items():
-        print(f"  {vtype:<14} {data['车辆数']:>4} {data['基准值_t_per_辆']:>6.0f} {data['配额_t']:>8.1f}")
+        print(f"  {vtype:<14} {data['车辆数']:>4} {data['基准值_t_per_辆']:>6.0f} {data['模拟预算_t']:>8.1f}")
     
     # === 4. 碳价对标情景估算 ===
     print("\n" + "=" * 60)

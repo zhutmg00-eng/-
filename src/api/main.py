@@ -10,10 +10,10 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
 from pathlib import Path
 
-from src.models.fleet import FleetInput, VehicleInput
+from src.models.fleet import FleetInput
+from src.models.policy import PolicyAnswer, PolicyQuestion
 
 app = FastAPI(
     title="物流碳排放与减排情景决策助手 API",
@@ -83,16 +83,6 @@ class CarbonResult(BaseModel):
     scenario_cost: dict
     methodology_note: str
 
-class PolicyQuestion(BaseModel):
-    question: str
-    carbon_profile: dict
-
-class PolicyAnswer(BaseModel):
-    question: str
-    retrieved_sources: List[dict]
-    answer: str
-
-
 # ========== API路由 ==========
 
 @app.get("/api/health")
@@ -144,7 +134,11 @@ async def calculate_carbon(fleet_input: FleetInput, api_key: str = Depends(verif
     for v in fleet_input.fleet:
         fleet_summary[v.vehicle_type] = fleet_summary.get(v.vehicle_type, 0) + v.count
 
-    gap = estimate_quota_gap(baseline.total_emission_t, fleet_summary)
+    gap = estimate_quota_gap(
+        baseline.total_emission_t,
+        fleet_summary,
+        reduction_target=fleet_input.scenario_reduction_target,
+    )
 
     # 4. 加载碳价数据 → 估算成本
     price_df = load_carbon_price_data()
@@ -160,6 +154,7 @@ async def calculate_carbon(fleet_input: FleetInput, api_key: str = Depends(verif
             "预算差额_t": gap.gap_t,
             "状态": gap.gap_status,
             "分车型预算": gap.quota_by_type,
+            "情景减排目标": gap.reduction_target,
             "口径说明": "科研原型估算，不是法定配额或履约依据",
         },
         scenario_cost=cost,

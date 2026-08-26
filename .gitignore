@@ -48,4 +48,5 @@ __pycache__/
 
 # 本地验收产物
 .playwright-cli/
+output/playwright/
 tmp/

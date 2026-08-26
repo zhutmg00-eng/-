@@ -1,43 +1,48 @@
 """物流企业模拟碳预算差额估算。
 
 预算计算公式：
-    Q = Σ (n_i × q_benchmark_i × adjustment_factor)
-    Gap = E - Q
+    B = Σ (n_i × EF_i × d_reference_i / 1000 × (1 - r_target))
+    Gap = E - B
 
-Q 仅用于科研原型的减排情景对标，不是法定碳配额。物流运输行业目前
+B 仅用于科研原型的减排情景对标，不是法定碳配额。物流运输行业目前
 未纳入全国碳市场配额管理，因此差额不代表履约义务或可交易资产。
 """
 from dataclasses import dataclass
 
+from src.engine.emission_factors import get_all_factors
+
 # ============================================================
 # 模拟碳预算基准值（tCO2e/辆/年）
 #
-# ⚠️ 注意：以下为原型验证用估算值，非官方配额分配数据。
-# 物流运输行业尚未纳入全国碳市场配额管理，以下基准值
-# 参考发电行业配额分配思路（按排放强度×年均里程折算）估算。
-#
-# 估算方法：
-#   基准值 ≈ 排放因子(kg/km) × 年均里程(km) / 1000 × 0.9（先进值系数）
-#
-# 数据来源：
-# - 排放因子：蔡博峰等(2021)中国环境科学
-# - 年均里程：GB/T 27840-2021重型商用车燃料消耗量测量方法附录
-# - 先进值系数0.9：参照《2023-2024年度全国碳排放权交易配额总量和分配方案》
-#   发电行业配额基准值取行业先进值约90%分位数
-#
-# 待物流行业正式纳入碳市场后，需替换为官方发布的配额基准值。
+# 以下是项目自定义的10%直接运营减排目标情景，不是政策目标或官方配额。
+# 每个值都由当前排放因子和CSV中的参考年均里程直接计算，便于复算和
+# 敏感性分析，不再使用无法由注释公式复现的手工常数。
 # ============================================================
-QUOTA_BENCHMARK = {
-    "重型柴油货车": 72.0,    # 0.877 kg/km × 80000 km / 1000 × 0.9 ≈ 63.1，取整72（含安全裕量）
-    "中型柴油货车": 42.0,    # 0.508 × 50000 / 1000 × 0.9 ≈ 22.9，取整42（含安全裕量）
-    "轻型柴油货车": 22.0,    # 0.374 × 30000 / 1000 × 0.9 ≈ 10.1，取整22（含安全裕量）
-    "微型汽油货车": 12.0,    # 0.216 × 20000 / 1000 × 0.9 ≈ 3.9，取整12（含安全裕量）
-    "LNG重型货车": 58.0,     # 0.72 × 80000 / 1000 × 0.9 ≈ 51.8，取整58
-    "新能源物流车": 0.0,     # 电动车纳入配额管理方式待定，暂设为0
-}
+DEFAULT_SCENARIO_REDUCTION_TARGET = 0.10
 
-# 基准线法默认调整因子（参照配额分配方案，1.0=基准线，不额外调整）
-ADJUSTMENT_FACTOR = 1.0
+
+def build_simulation_budget_benchmarks(
+    reduction_target: float = DEFAULT_SCENARIO_REDUCTION_TARGET,
+) -> dict[str, float]:
+    """按统一公式生成每辆车的模拟预算基准。"""
+    if not 0 <= reduction_target < 1:
+        raise ValueError("情景减排目标必须在0（含）到1（不含）之间")
+
+    benchmarks = {}
+    for vehicle_type, factor in get_all_factors().items():
+        annual_km = factor.get("avg_annual_km")
+        if annual_km is None or annual_km <= 0:
+            raise ValueError(f"车型缺少有效参考年均里程: {vehicle_type}")
+        reference_emission = factor["co2_kg_per_km"] * annual_km / 1000
+        # 保留内部精度；仅在最终展示/响应时四舍五入，避免车队规模放大
+        # 单车基准的舍入误差。
+        benchmarks[vehicle_type] = reference_emission * (1 - reduction_target)
+    return benchmarks
+
+
+SIMULATION_BUDGET_BENCHMARK = build_simulation_budget_benchmarks()
+# 兼容既有导入；该名称不表示法定配额。
+QUOTA_BENCHMARK = SIMULATION_BUDGET_BENCHMARK
 
 
 @dataclass
@@ -49,15 +54,21 @@ class QuotaGapResult:
     gap_t: float               # 差额（正=超出预算，负=低于预算）
     gap_status: str            # "超出预算" | "低于预算" | "基本平衡"
     quota_by_type: dict        # 分车型模拟预算明细
+    reduction_target: float    # 项目设定的直接运营减排目标
 
 
-def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapResult:
+def estimate_quota_gap(
+    emission_total: float,
+    fleet_summary: dict,
+    reduction_target: float = DEFAULT_SCENARIO_REDUCTION_TARGET,
+) -> QuotaGapResult:
     """
     估算企业直接运营排放与模拟碳预算的差额。
 
     Args:
         emission_total: 企业年度直接运营排放基线 (tCO2e)
         fleet_summary: 各车型车辆数 {"重型柴油货车": 50, "中型柴油货车": 30, ...}
+        reduction_target: 相对参考活动排放的项目情景减排比例
 
     Returns:
         QuotaGapResult: 模拟碳预算差额结果
@@ -67,15 +78,18 @@ def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapRe
     """
     total_quota = 0.0
     quota_by_type = {}
+    benchmarks = build_simulation_budget_benchmarks(reduction_target)
 
     for vtype, count in fleet_summary.items():
-        benchmark = QUOTA_BENCHMARK.get(vtype, 0)
-        type_quota = count * benchmark * ADJUSTMENT_FACTOR
+        if vtype not in benchmarks:
+            raise ValueError(f"车型没有模拟预算基准: {vtype}")
+        benchmark = benchmarks[vtype]
+        type_quota = count * benchmark
         total_quota += type_quota
         quota_by_type[vtype] = {
             "车辆数": count,
-            "基准值_t_per_辆": benchmark,
-            "配额_t": round(type_quota, 2),
+            "基准值_t_per_辆": round(benchmark, 4),
+            "模拟预算_t": round(type_quota, 2),
         }
 
     gap = emission_total - total_quota
@@ -93,4 +107,5 @@ def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapRe
         gap_t=round(gap, 2),
         gap_status=status,
         quota_by_type=quota_by_type,
+        reduction_target=reduction_target,
     )

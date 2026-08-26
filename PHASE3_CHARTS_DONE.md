@@ -12,7 +12,7 @@
 | 函数 | 说明 |
 |------|------|
 | `plot_emission_pie(emission_by_type)` | 各车型碳排放占比环形图（绿色系配色） |
-| `plot_quota_comparison(total_emission, total_quota, gap)` | 排放量/配额/缺口柱状图对比（缺口红色高亮） |
+| `plot_quota_comparison(total_emission, total_quota, gap)` | 直接运营排放/模拟预算/差额柱状图对比 |
 | `plot_carbon_price_stats(price_stats)` | 碳价水平线对比图（当前价/90日均价/最高/最低） |
 | `plot_fleet_comparison(multi_results)` | 多企业分组柱状图对比 |
 
@@ -24,5 +24,5 @@
 - 所有函数均有中文 docstring
 - 使用 `plotly.graph_objects`（go）创建 figure
 - 环形图使用绿色系 `GREEN_PALETTE`
-- 缺口用红色（正缺口）/ 橙色（负盈余）区分
+- 差额用红色（超出预算）/ 橙色（低于预算）区分
 - 碳价图返回 `go.Figure | None`（空数据返回 None）

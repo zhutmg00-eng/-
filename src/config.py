@@ -69,9 +69,6 @@ def get_llm_config(model: str = None) -> dict:
 LOAD_FACTOR_ALPHA = 0.15
 LOAD_FACTOR_THRESHOLD = 0.75
 
-# 配额基准线法默认调整因子
-QUOTA_ADJUSTMENT_FACTOR = 1.0
-
 # ============================================================
 # RAG参数
 # ============================================================

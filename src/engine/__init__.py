@@ -13,6 +13,9 @@ from src.engine.calculator import (
 from src.engine.quota import (
     estimate_quota_gap,
     QuotaGapResult,
+    SIMULATION_BUDGET_BENCHMARK,
+    DEFAULT_SCENARIO_REDUCTION_TARGET,
+    build_simulation_budget_benchmarks,
     QUOTA_BENCHMARK,
 )
 from src.engine.carbon_price import (
@@ -31,6 +34,9 @@ __all__ = [
     "calculate_load_adjustment",
     "estimate_quota_gap",
     "QuotaGapResult",
+    "SIMULATION_BUDGET_BENCHMARK",
+    "DEFAULT_SCENARIO_REDUCTION_TARGET",
+    "build_simulation_budget_benchmarks",
     "QUOTA_BENCHMARK",
     "estimate_compliance_cost",
     "load_carbon_price_data",

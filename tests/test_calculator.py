@@ -12,7 +12,11 @@ from src.engine.calculator import (
     calculate_load_adjustment,
 )
 from src.engine.emission_factors import get_emission_factor, list_vehicle_types
-from src.engine.quota import estimate_quota_gap, QUOTA_BENCHMARK
+from src.engine.quota import (
+    SIMULATION_BUDGET_BENCHMARK,
+    build_simulation_budget_benchmarks,
+    estimate_quota_gap,
+)
 from src.engine.carbon_price import estimate_compliance_cost
 
 
@@ -41,6 +45,12 @@ class TestEmissionFactors:
         assert len(types) >= 6
         assert "重型柴油货车" in types
         assert "新能源物流车" in types
+
+    def test_reference_only_electric_factors_are_not_operational_types(self):
+        types = list_vehicle_types()
+        assert "纯电动重卡(全生命周期)" not in types
+        assert "纯电动重卡(河北电网)" not in types
+        assert get_emission_factor("纯电动重卡(全生命周期)") is None
 
 
 # ============================================================
@@ -125,34 +135,52 @@ class TestCalculator:
 
 
 # ============================================================
-# 配额缺口测试
+# 模拟碳预算差额测试
 # ============================================================
 
 class TestQuotaGap:
     def test_gap_positive(self):
-        """排放>配额 → 缺口"""
+        """排放高于模拟预算。"""
         fleet_summary = {"重型柴油货车": 50}
         result = estimate_quota_gap(4000.0, fleet_summary)
-        # 配额 = 50 × 72 = 3600
-        assert result.gap_t == 400.0
+        # 模拟预算 = 50 × 63.144 = 3157.2
+        assert result.gap_t == 842.8
         assert result.gap_status == "超出预算"
 
     def test_gap_negative(self):
-        """排放<配额 → 盈余"""
+        """排放低于模拟预算。"""
         fleet_summary = {"重型柴油货车": 50}
         result = estimate_quota_gap(3000.0, fleet_summary)
-        assert result.gap_t == -600.0
+        assert result.gap_t == -157.2
         assert result.gap_status == "低于预算"
 
     def test_gap_balanced(self):
-        """排放≈配额 → 平衡"""
+        """排放约等于模拟预算。"""
         fleet_summary = {"重型柴油货车": 50}
-        result = estimate_quota_gap(3600.0, fleet_summary)
+        result = estimate_quota_gap(3157.2, fleet_summary)
         assert result.gap_status == "基本平衡"
 
     def test_ev_no_quota(self):
-        """新能源物流车配额基准为0"""
-        assert QUOTA_BENCHMARK["新能源物流车"] == 0.0
+        """新能源物流车直接运营模拟预算基准为0。"""
+        assert SIMULATION_BUDGET_BENCHMARK["新能源物流车"] == 0.0
+
+    def test_budget_benchmark_matches_documented_formula(self):
+        expected = 0.877 * 80000 / 1000 * 0.90
+        assert SIMULATION_BUDGET_BENCHMARK["重型柴油货车"] == pytest.approx(expected)
+
+    def test_budget_covers_every_supported_operational_vehicle(self):
+        assert set(list_vehicle_types()) == set(SIMULATION_BUDGET_BENCHMARK)
+
+    def test_budget_target_is_configurable(self):
+        no_reduction = build_simulation_budget_benchmarks(0)
+        assert no_reduction["重型柴油货车"] == 70.16
+        result = estimate_quota_gap(3508.0, {"重型柴油货车": 50}, reduction_target=0)
+        assert result.gap_status == "基本平衡"
+
+    @pytest.mark.parametrize("target", [-0.01, 1.0])
+    def test_budget_target_rejects_invalid_values(self, target):
+        with pytest.raises(ValueError, match="情景减排目标"):
+            build_simulation_budget_benchmarks(target)
 
 
 # ============================================================
@@ -161,7 +189,7 @@ class TestQuotaGap:
 
 class TestCarbonPrice:
     def test_positive_gap_with_mock_price(self):
-        """有缺口时返回成本估算"""
+        """超出模拟预算时返回情景金额。"""
         result = estimate_compliance_cost(1000.0, None)
         assert result["情景判断"] == "超出模拟碳预算"
         assert result["预算差额_t"] == 1000.0
@@ -169,14 +197,14 @@ class TestCarbonPrice:
         assert "不代表" in result["备注"]
 
     def test_negative_gap(self):
-        """盈余时返回收益估算"""
+        """低于模拟预算时返回潜在价值情景。"""
         result = estimate_compliance_cost(-500.0, None)
         assert result["情景判断"] == "低于模拟碳预算"
         assert result["潜在价值_low"] > 0
         assert "不代表" in result["备注"]
 
     def test_zero_gap(self):
-        """零缺口时也返回盈余"""
+        """零差额时返回基本平衡。"""
         result = estimate_compliance_cost(0.0, None)
         assert result["情景判断"] == "基本平衡"
         assert result["预算结余_t"] == 0

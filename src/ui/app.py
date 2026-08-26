@@ -1,4 +1,5 @@
 """Streamlit 主入口"""
+import logging
 import os
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import streamlit as st
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 APP_API_KEY = os.getenv("APP_API_KEY", "")
 API_HEADERS = {"X-API-Key": APP_API_KEY} if APP_API_KEY else {}
+logger = logging.getLogger(__name__)
 
 
 def api_post(path: str, payload: dict) -> requests.Response:
@@ -34,6 +36,18 @@ st.set_page_config(
     page_title="物流碳排放与减排情景决策助手",
     page_icon="🌿",
     layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+    @media (max-width: 640px) {
+        h1 { font-size: 2rem !important; line-height: 1.25 !important; }
+        h2 { font-size: 1.55rem !important; line-height: 1.3 !important; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 st.title("🌿 物流碳排放与减排情景决策助手")
@@ -63,6 +77,14 @@ elif page == "📊 碳排放盘点":
     st.caption("核算边界：新能源车仅计直接运营排放，未计购电间接排放和全生命周期排放。")
 
     company_name = st.text_input("企业名称", "示例物流公司")
+    scenario_reduction_target = st.slider(
+        "模拟预算减排目标",
+        min_value=0.0,
+        max_value=0.5,
+        value=0.10,
+        step=0.05,
+        help="相对各车型参考活动排放的科研情景参数，不是政策目标或法定配额。",
+    )
 
     st.subheader("车队信息")
     if "fleet_data" not in st.session_state:
@@ -109,23 +131,25 @@ elif page == "📊 碳排放盘点":
                     response = api_post("/api/calculate", {
                         "company_name": company_name,
                         "fleet": st.session_state.fleet_data,
+                        "scenario_reduction_target": scenario_reduction_target,
                     })
                     if response.status_code == 200:
                         result = response.json()
                         st.session_state.carbon_result = result
                         st.session_state.company_name = company_name.strip()
 
-                        m1, m2, m3 = st.columns(3)
+                        m1, m2, m3, m4 = st.columns(4)
                         m1.metric("直接运营排放", f"{result['total_emission_t']:.0f} tCO2e")
-                        m2.metric("模拟预算差额", f"{result['carbon_budget']['预算差额_t']:.0f} tCO2e")
-                        m3.metric("情景状态", result['carbon_budget']['状态'])
+                        m2.metric("模拟碳预算", f"{result['carbon_budget']['模拟碳预算_t']:.0f} tCO2e")
+                        m3.metric("预算差额", f"{result['carbon_budget']['预算差额_t']:.0f} tCO2e")
+                        m4.metric("情景状态", result['carbon_budget']['状态'])
 
                         st.subheader("分车型排放明细")
                         emission_rows = [
                             {"车型": name, **details}
                             for name, details in result["emission_by_type"].items()
                         ]
-                        st.dataframe(emission_rows, use_container_width=True, hide_index=True)
+                        st.dataframe(emission_rows, width="stretch", hide_index=True)
 
                         st.subheader("碳价对标情景")
                         st.json(result['scenario_cost'])
@@ -137,8 +161,8 @@ elif page == "📊 碳排放盘点":
         st.info("请添加至少一种车型")
 
 elif page == "💬 政策顾问":
-    st.header("💬 碳交易政策智能顾问")
-    st.caption("我是您的AI碳政策顾问，请用自然语言向我提问")
+    st.header("💬 交通低碳政策资料顾问")
+    st.caption("检索交通低碳、排放核算与碳市场政策资料，并提示适用范围")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -147,7 +171,7 @@ elif page == "💬 政策顾问":
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("请输入您的碳交易合规问题..."):
+    if prompt := st.chat_input("请输入交通低碳或排放核算政策问题..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
@@ -190,7 +214,8 @@ elif page == "📄 生成报告":
     result = st.session_state.get("carbon_result")
     if result:
         st.write("当前计算结果已缓存，可导出为PDF报告")
-        st.json(result)
+        with st.expander("查看计算明细"):
+            st.json(result)
         if st.button("📥 导出PDF报告", type="primary"):
             try:
                 from src.ui.components.report import generate_carbon_report
@@ -218,6 +243,7 @@ elif page == "📄 生成报告":
                     gap_status=carbon_budget.get("状态", "未知"),
                     compliance_cost=scenario_cost,
                     llm_answer=llm_answer,
+                    budget_reduction_target=carbon_budget.get("情景减排目标", 0.10),
                 )
                 st.success(f"✅ 报告已保存：`{report_path}`")
                 st.write(f"**报告路径：** `{report_path}`")
@@ -349,6 +375,9 @@ elif page == "🔬 减排分析":
                             scenario_result = reduction_module.analyze_reduction_scenario(
                                 baseline_fleet=baseline_fleet,
                                 changes=changes,
+                                budget_reduction_target=carbon_result.get("carbon_budget", {}).get(
+                                    "情景减排目标", 0.10
+                                ),
                             )
                             scenario_dict = scenario_result.to_dict()
                         else:
@@ -389,7 +418,7 @@ elif page == "🔬 减排分析":
                                 if f["vehicle_type"] == selected_type:
                                     avg_km = f["annual_km"]
                                     break
-                            load_reduction = replace_count * avg_km * ef * (old_adj - new_adj) / 1000
+                            load_reduction = replace_load * avg_km * ef * (old_adj - new_adj) / 1000
                             reduction += max(0, load_reduction)
 
                         scenario_emission = max(0, baseline_emission - reduction)
@@ -431,7 +460,6 @@ elif page == "🔬 减排分析":
                     for rec in r.get("recommendations", []):
                         st.write(rec)
 
-                except Exception as e:
-                    st.error(f"计算减排效果失败：{e}")
-                    import traceback
-                    st.code(traceback.format_exc())
+                except Exception:
+                    logger.exception("计算减排效果失败")
+                    st.error("计算减排效果失败，请检查输入或稍后重试。")

@@ -1,12 +1,12 @@
-"""排放因子数据库（已整合GB 30510-2024最新数据）
+"""车辆直接运营排放因子数据库。
 
 数据来源：
 - 蔡博峰等. 中国分省道路交通二氧化碳排放因子. 中国环境科学, 2021.
 - GB 30510-2024《重型商用车辆燃料消耗量限值》（第四阶段，2025年7月实施）
 - GB 30510-2018《重型商用车辆燃料消耗量限值》（第三阶段，已废止）
 - IPCC 2019 Refinement, Volume 2, Chapter 3 (Mobile Combustion)
-- GLEC框架3.0 (智慧货运中心)
-- 国家温室气体排放因子数据库第二版（2026年3月发布，576个因子）
+CSV 中的全生命周期和区域电网情景数据仅作研究参考，不会加载为本
+模块的可选车型，避免与车辆直接运营核算边界混用。
 """
 from typing import Dict, Optional
 import csv
@@ -75,6 +75,11 @@ CSV_PATH = Path(__file__).parent.parent.parent / "data" / "raw" / "emission_fact
 EMISSION_FACTORS: Dict[str, Dict] = {}
 
 
+def _is_direct_operational_factor(vehicle_type: str, source: str) -> bool:
+    """排除全生命周期和购电情景因子，保持统一核算边界。"""
+    return not any(marker in vehicle_type for marker in ("全生命周期", "电网"))
+
+
 def _load_factors() -> Dict[str, Dict]:
     """加载排放因子：优先CSV，回退到内置表"""
     if CSV_PATH.exists():
@@ -86,12 +91,15 @@ def _load_factors() -> Dict[str, Dict]:
                     vtype = row.get("车辆类型", "").strip()
                     if not vtype:
                         continue
+                    source = row.get("数据来源", "").strip()
+                    if not _is_direct_operational_factor(vtype, source):
+                        continue
                     factors[vtype] = {
                         "co2_kg_per_km": float(row.get("CO2排放因子(kg/km)", 0)),
                         "fuel_type": row.get("燃料类型", ""),
                         "fuel_consumption_l_per_100km": float(row["油耗(L/100km)"]) if row.get("油耗(L/100km)") else None,
                         "avg_annual_km": int(row.get("年均里程参考(km)", 0)) or None,
-                        "source": row.get("数据来源", ""),
+                        "source": source,
                     }
             if factors:
                 return factors

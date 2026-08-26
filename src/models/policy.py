@@ -1,12 +1,25 @@
 """政策问答数据模型"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
 class PolicyQuestion(BaseModel):
     """政策问答输入"""
-    question: str = Field(..., description="用户自然语言问题")
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="用户自然语言问题",
+    )
     carbon_profile: dict = Field(default_factory=dict, description="企业碳画像数据")
+
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str) -> str:
+        question = value.strip()
+        if not question:
+            raise ValueError("问题不能为空")
+        return question
 
 
 class RetrievedSource(BaseModel):

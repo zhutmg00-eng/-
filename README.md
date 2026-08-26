@@ -101,7 +101,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 │   ├── models/                 # Pydantic 输入模型
 │   ├── rag/                    # 解析、混合检索与生成
 │   └── ui/                     # Streamlit 与 PDF 报告
-├── tests/                      # 50 项自动化测试
+├── tests/                      # 61 项自动化测试
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -133,14 +133,14 @@ E = sum(n_i * d_i * EF_i * LF_i) / 1000
 - `EF_i`：车辆直接排放因子
 - `LF_i`：低满载率调整系数
 
-模拟碳预算差额：
+模拟碳预算差额（默认减排目标 `r_target=10%`，页面可调整）：
 
 ```text
-Gap = E - Q
-Q = sum(n_i * q_benchmark_i * adjustment_factor)
+Gap = E - B
+B = sum(n_i * EF_i * d_reference_i * (1 - r_target)) / 1000
 ```
 
-`Q` 是项目原型基准，不是官方分配的免费配额。情景金额使用全国碳市场历史价格作对标，不能解释为物流企业当前履约成本或确定收益。
+`B` 由排放因子、参考年均里程和用户选择的情景减排目标直接计算，可复算并用于敏感性分析；内部计算保留原始精度，仅在最终响应和展示时四舍五入。它不是官方分配的免费配额或政策目标。情景金额使用全国碳市场历史价格作对标，不能解释为物流企业当前履约成本或确定收益。CSV 中标为全生命周期或区域电网情景的电动车因子不会进入直接运营车型列表。
 
 ## 验证
 
@@ -156,6 +156,8 @@ RAG 验收包含两项硬性相关性断言：
 - “交通运输行业碳达峰目标”首条命中交通运输碳达峰实施方案
 
 PDF 测试会检查预算字段、科研免责声明、新能源核算边界、页码和字体兼容单位。
+
+`docs/ci-workflow-template.yml` 是尚未激活的 GitHub Actions 模板。启用时需将其移入 `.github/workflows/`，并使用具有 `workflow` 权限的 GitHub 凭据推送；只有远端实际运行通过后才能宣称 CI 已启用。
 
 ## 下一阶段研究重点
 

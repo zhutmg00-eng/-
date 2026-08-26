@@ -27,6 +27,12 @@ class FleetInput(BaseModel):
 
     company_name: str = Field(..., min_length=1, max_length=100, description="企业名称")
     fleet: list[VehicleInput] = Field(..., min_length=1, description="车队分组列表")
+    scenario_reduction_target: float = Field(
+        0.10,
+        ge=0,
+        lt=1,
+        description="模拟预算相对参考活动排放的减排目标（科研情景参数）",
+    )
 
     @field_validator("company_name")
     @classmethod

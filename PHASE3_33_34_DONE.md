@@ -26,8 +26,8 @@
 
 **计算逻辑：**
 - 复用 `calculator.py` 的 `calculate_emission()` 和 `VehicleGroupData`
-- 复用 `quota.py` 的 `estimate_quota_gap()` 计算配额缺口变化
-- 复用 `carbon_price.py` 的 `estimate_compliance_cost()` 计算合规成本节省
+- 复用 `quota.py` 的 `estimate_quota_gap()` 计算模拟碳预算差额变化
+- 复用 `carbon_price.py` 的 `estimate_compliance_cost()` 计算碳价对标情景金额
 - 生成具体中文建议（新能源车关注全生命周期、LNG 关注甲烷逃逸、满载率关注智能调度）
 
 ---
@@ -52,9 +52,9 @@
 ```
 
 **响应内容：**
-- 每个企业的排放总量、配额缺口、合规成本
-- 三个维度的排序：按排放量、按配额缺口、按合规成本
-- 汇总统计（总排放、总缺口、总成本、各维度最高企业）
+- 每个企业的直接运营排放、模拟碳预算差额和情景金额
+- 三个维度的排序：按排放量、按预算差额、按情景金额
+- 汇总统计（总排放、预算差额、情景金额及各维度最高企业）
 
 **更新 `src/api/main.py`：**
 - 添加 `from src.api.routes_compare import router as compare_router`
@@ -70,18 +70,18 @@
 |------|------|
 | `Dockerfile` | 多阶段构建（python:3.11-slim），安装中文字体，暴露8000+8501 |
 | `docker-compose.yml` | 开发环境：api(FastAPI) + web(Streamlit)，共享 data volume |
-| `docker-compose.prod.yml` | 生产覆盖：绑定 0.0.0.0，CORS 通配，API Key 必设 |
+| `docker-compose.prod.yml` | 生产覆盖：绑定 0.0.0.0，CORS 来源和 API Key 必须显式配置 |
 | `.env.example` | 环境变量模板（API Key、LLM、CORS 等） |
 | `.dockerignore` | 排除 venv、__pycache__、.git、IDE 配置等 |
 
 **启动方式：**
 ```bash
 # 开发环境
-docker compose up -d
+docker compose up --build -d
 
 # 生产环境
 cp .env.example .env  # 编辑填入配置
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 ```
 
 ---

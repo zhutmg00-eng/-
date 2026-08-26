@@ -43,6 +43,7 @@ class EnterpriseCompareResult(BaseModel):
     carbon_budget_t: float
     budget_gap_t: float
     budget_status: str
+    budget_reduction_target: float
     scenario_cost: dict
 
 
@@ -119,7 +120,11 @@ async def compare_enterprises(
         baseline = calculate_emission(fleet)
 
         # 3. 估算模拟碳预算差额
-        gap = estimate_quota_gap(baseline.total_emission_t, fleet_summary)
+        gap = estimate_quota_gap(
+            baseline.total_emission_t,
+            fleet_summary,
+            reduction_target=company.scenario_reduction_target,
+        )
 
         # 4. 估算碳价对标情景成本
         cost = estimate_compliance_cost(gap.gap_t, price_df)
@@ -132,6 +137,7 @@ async def compare_enterprises(
             carbon_budget_t=gap.total_quota_t,
             budget_gap_t=gap.gap_t,
             budget_status=gap.gap_status,
+            budget_reduction_target=gap.reduction_target,
             scenario_cost=cost,
         ))
 

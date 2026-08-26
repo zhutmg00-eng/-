@@ -43,8 +43,40 @@ class TestAPI:
         assert result["total_emission_t"] > 3000
         assert result["total_vehicles"] == 50
         assert result["carbon_budget"]["状态"] in {"超出预算", "低于预算", "基本平衡"}
-        assert result["carbon_budget"]["模拟碳预算_t"] == 3600.0
+        assert result["carbon_budget"]["模拟碳预算_t"] == 3157.2
+        assert result["carbon_budget"]["预算差额_t"] == 350.8
+        assert result["carbon_budget"]["情景减排目标"] == 0.10
         assert "购电间接排放" in result["methodology_note"]
+
+    def test_calculate_accepts_custom_budget_target(self):
+        response = client.post("/api/calculate", json={
+            "company_name": "零目标情景",
+            "scenario_reduction_target": 0,
+            "fleet": [{
+                "vehicle_type": "重型柴油货车",
+                "count": 50,
+                "annual_km": 80000,
+                "load_factor": 0.75,
+            }],
+        })
+        assert response.status_code == 200
+        budget = response.json()["carbon_budget"]
+        assert budget["模拟碳预算_t"] == 3508.0
+        assert budget["状态"] == "基本平衡"
+
+    @pytest.mark.parametrize("target", [-0.1, 1.0])
+    def test_calculate_rejects_invalid_budget_target(self, target):
+        response = client.post("/api/calculate", json={
+            "company_name": "目标边界测试",
+            "scenario_reduction_target": target,
+            "fleet": [{
+                "vehicle_type": "重型柴油货车",
+                "count": 1,
+                "annual_km": 80000,
+                "load_factor": 0.75,
+            }],
+        })
+        assert response.status_code == 422
 
     def test_calculate_empty_fleet(self):
         """空车队应在进入计算引擎前被拒绝"""
@@ -116,3 +148,11 @@ class TestAPI:
         assert result["total_vehicles"] == 60
         # 新能源车排放为0，不影响总量
         assert result["total_emission_t"] > 0
+
+    @pytest.mark.parametrize("question", ["   ", "问题" * 251])
+    def test_ask_rejects_invalid_question(self, question):
+        response = client.post(
+            "/api/ask",
+            json={"question": question, "carbon_profile": {}},
+        )
+        assert response.status_code == 422
