@@ -1,0 +1,393 @@
+"""TCO (Total Cost of Ownership) 全生命周期综合拥有成本与投资决策引擎。
+
+核心数学模型：
+1. CAPEX 差异（初始购置与充电增量）：
+   ΔCAPEX = (单车购车价_EV - 单车购车价_ICE + 充电桩分摊) × 替换车辆数
+2. OPEX 年度运营节省（能耗 + 维保）：
+   - 燃油车年能耗：C_fuel = (年里程 / 100) × 百公里油耗(L) × 柴油/汽油单价(元/L)
+   - 新能源年电耗：C_elec = (年里程 / 100) × 百公里电耗(kWh) × 综合电价(元/kWh)
+   - 维保节省：燃油车年维保基准 × 维保节省率
+   - 年度总节省：ΔOPEX = (C_fuel - C_elec + 维保节省) × 替换车辆数
+3. 静态投资回收期（年）：
+   T_payback = ΔCAPEX / ΔOPEX
+4. 单位吨碳减排边际成本（MAC, 元/tCO2e）：
+   MAC = (ΔCAPEX - Σ[ΔOPEX_t / (1+r)^t]) / 全周期总减碳量
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class VehicleTCOBenchmark:
+    """车型 TCO 基础经济与能耗基准参数。"""
+
+    ice_vehicle_price_wan: float  # 燃油车购车单价（万元）
+    ev_vehicle_price_wan: float  # 新能源纯电车购车单价（万元）
+    charger_cost_wan: float  # 充电桩配套分摊（万元/车）
+    fuel_consumption_per_100km: float  # 燃油车百公里油耗（L/100km）
+    electricity_consumption_per_100km: float  # 纯电车百公里电耗（kWh/100km）
+    fuel_type: str  # 燃料类型：柴油 / 汽油
+    annual_maintenance_ice_yuan: float  # 燃油车年维保基准（元/年/车）
+    maintenance_saving_ratio: float = 0.35  # 新能源维保节省比例（默认35%）
+
+
+# 行业主流商用货车 TCO 默认基准库
+DEFAULT_TCO_BENCHMARKS: Dict[str, VehicleTCOBenchmark] = {
+    "重型柴油货车": VehicleTCOBenchmark(
+        ice_vehicle_price_wan=35.0,
+        ev_vehicle_price_wan=65.0,
+        charger_cost_wan=3.0,
+        fuel_consumption_per_100km=33.0,
+        electricity_consumption_per_100km=140.0,
+        fuel_type="柴油",
+        annual_maintenance_ice_yuan=15000.0,
+        maintenance_saving_ratio=0.35,
+    ),
+    "中型柴油货车": VehicleTCOBenchmark(
+        ice_vehicle_price_wan=18.0,
+        ev_vehicle_price_wan=30.0,
+        charger_cost_wan=1.5,
+        fuel_consumption_per_100km=19.0,
+        electricity_consumption_per_100km=75.0,
+        fuel_type="柴油",
+        annual_maintenance_ice_yuan=9000.0,
+        maintenance_saving_ratio=0.35,
+    ),
+    "轻型柴油货车": VehicleTCOBenchmark(
+        ice_vehicle_price_wan=11.0,
+        ev_vehicle_price_wan=17.0,
+        charger_cost_wan=0.8,
+        fuel_consumption_per_100km=12.0,
+        electricity_consumption_per_100km=35.0,
+        fuel_type="柴油",
+        annual_maintenance_ice_yuan=6000.0,
+        maintenance_saving_ratio=0.35,
+    ),
+    "微型汽油货车": VehicleTCOBenchmark(
+        ice_vehicle_price_wan=5.0,
+        ev_vehicle_price_wan=8.0,
+        charger_cost_wan=0.3,
+        fuel_consumption_per_100km=8.0,
+        electricity_consumption_per_100km=20.0,
+        fuel_type="汽油",
+        annual_maintenance_ice_yuan=3500.0,
+        maintenance_saving_ratio=0.30,
+    ),
+}
+
+
+@dataclass
+class TCOEconomicParameters:
+    """宏观经济与通用能源价格参数。"""
+
+    diesel_price_yuan_per_l: float = 7.50  # 柴油单价（元/L）
+    gasoline_price_yuan_per_l: float = 7.80  # 汽油单价（元/L）
+    electricity_price_yuan_per_kwh: float = 0.80  # 综合电价（元/kWh）
+    discount_rate: float = 0.06  # 年贴现率 r（默认6%）
+    lifespan_years: int = 5  # 车辆运营评估周期 N（年）
+
+
+@dataclass
+class SingleVehicleTCOResult:
+    """单车及同车型批量替换的 TCO 分析结果。"""
+
+    target_vehicle_type: str  # 目标燃油车型
+    replace_count: int  # 替换车辆数
+    annual_km: float  # 单车年均里程 (km)
+    delta_capex_total_yuan: float  # 初始总投资增量（元）
+    delta_capex_per_vehicle_yuan: float  # 单车投资增量（元/辆）
+    annual_fuel_cost_per_vehicle_yuan: float  # 燃油车年能耗费（元/车）
+    annual_elec_cost_per_vehicle_yuan: float  # 纯电车年电费（元/车）
+    annual_energy_saving_total_yuan: float  # 全车队年能耗节省总额（元/年）
+    annual_maintenance_saving_total_yuan: float  # 全车队年维保节省总额（元/年）
+    annual_opex_saving_total_yuan: float  # 全车队年运营节省总额 ΔOPEX（元/年）
+    payback_period_years: Optional[float]  # 静态投资回收期（年）
+    mac_yuan_per_tco2e: Optional[float]  # 单位吨碳减排边际成本 MAC (元/tCO2e)
+    annual_co2_reduction_t: float  # 年直接减排量 (tCO2e)
+    lifespan_co2_reduction_t: float  # 全生命周期总减排量 (tCO2e)
+    lifespan_net_savings_yuan: float  # 全生命周期净节省 (NPV折现后净现值收益，元)
+    yearly_cumulative_cashflow_yuan: List[float] = field(default_factory=list)  # 0~N年累计现金流
+
+
+@dataclass
+class FleetTCOResult:
+    """车队级多车型组合替换的综合 TCO 决策分析。"""
+
+    total_replace_count: int
+    total_delta_capex_yuan: float
+    total_annual_opex_saving_yuan: float
+    total_annual_energy_saving_yuan: float
+    total_annual_maint_saving_yuan: float
+    overall_payback_period_years: Optional[float]
+    total_annual_co2_reduction_t: float
+    total_lifespan_co2_reduction_t: float
+    overall_mac_yuan_per_tco2e: Optional[float]
+    total_lifespan_net_savings_yuan: float
+    by_vehicle_type: Dict[str, SingleVehicleTCOResult] = field(default_factory=dict)
+    yearly_cashflow: List[float] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为前端和 API 使用的字典结构。"""
+        return {
+            "total_replace_count": self.total_replace_count,
+            "total_delta_capex_yuan": round(self.total_delta_capex_yuan, 2),
+            "total_delta_capex_wan": round(self.total_delta_capex_yuan / 10000.0, 2),
+            "total_annual_opex_saving_yuan": round(self.total_annual_opex_saving_yuan, 2),
+            "total_annual_opex_saving_wan": round(self.total_annual_opex_saving_yuan / 10000.0, 2),
+            "total_annual_energy_saving_yuan": round(self.total_annual_energy_saving_yuan, 2),
+            "total_annual_maint_saving_yuan": round(self.total_annual_maint_saving_yuan, 2),
+            "overall_payback_period_years": (
+                round(self.overall_payback_period_years, 2)
+                if self.overall_payback_period_years is not None
+                else None
+            ),
+            "total_annual_co2_reduction_t": round(self.total_annual_co2_reduction_t, 2),
+            "total_lifespan_co2_reduction_t": round(self.total_lifespan_co2_reduction_t, 2),
+            "overall_mac_yuan_per_tco2e": (
+                round(self.overall_mac_yuan_per_tco2e, 2)
+                if self.overall_mac_yuan_per_tco2e is not None
+                else None
+            ),
+            "total_lifespan_net_savings_yuan": round(self.total_lifespan_net_savings_yuan, 2),
+            "total_lifespan_net_savings_wan": round(self.total_lifespan_net_savings_yuan / 10000.0, 2),
+            "yearly_cashflow": [round(val, 2) for val in self.yearly_cashflow],
+            "by_vehicle_type": {
+                k: {
+                    "replace_count": v.replace_count,
+                    "annual_km": v.annual_km,
+                    "delta_capex_yuan": round(v.delta_capex_total_yuan, 2),
+                    "annual_opex_saving_yuan": round(v.annual_opex_saving_total_yuan, 2),
+                    "payback_period_years": (
+                        round(v.payback_period_years, 2)
+                        if v.payback_period_years is not None
+                        else None
+                    ),
+                    "mac_yuan_per_tco2e": (
+                        round(v.mac_yuan_per_tco2e, 2)
+                        if v.mac_yuan_per_tco2e is not None
+                        else None
+                    ),
+                    "annual_co2_reduction_t": round(v.annual_co2_reduction_t, 2),
+                }
+                for k, v in self.by_vehicle_type.items()
+            },
+        }
+
+
+def get_tco_benchmark(vehicle_type: str) -> Optional[VehicleTCOBenchmark]:
+    """获取指定车型的 TCO 基准参数。"""
+    if vehicle_type in DEFAULT_TCO_BENCHMARKS:
+        return DEFAULT_TCO_BENCHMARKS[vehicle_type]
+    for key, spec in DEFAULT_TCO_BENCHMARKS.items():
+        if key in vehicle_type or vehicle_type in key:
+            return spec
+    return None
+
+
+def calculate_single_vehicle_tco(
+    vehicle_type: str,
+    replace_count: int,
+    annual_km: float,
+    annual_co2_reduction_t: float,
+    custom_benchmark: Optional[VehicleTCOBenchmark] = None,
+    econ_params: Optional[TCOEconomicParameters] = None,
+) -> SingleVehicleTCOResult:
+    """计算单一车型替换为新能源车的 TCO 经济账与回收期。"""
+    spec = custom_benchmark or get_tco_benchmark(vehicle_type)
+    params = econ_params or TCOEconomicParameters()
+
+    if spec is None or replace_count <= 0:
+        return SingleVehicleTCOResult(
+            target_vehicle_type=vehicle_type,
+            replace_count=replace_count,
+            annual_km=annual_km,
+            delta_capex_total_yuan=0.0,
+            delta_capex_per_vehicle_yuan=0.0,
+            annual_fuel_cost_per_vehicle_yuan=0.0,
+            annual_elec_cost_per_vehicle_yuan=0.0,
+            annual_energy_saving_total_yuan=0.0,
+            annual_maintenance_saving_total_yuan=0.0,
+            annual_opex_saving_total_yuan=0.0,
+            payback_period_years=None,
+            mac_yuan_per_tco2e=None,
+            annual_co2_reduction_t=annual_co2_reduction_t,
+            lifespan_co2_reduction_t=annual_co2_reduction_t * params.lifespan_years,
+            lifespan_net_savings_yuan=0.0,
+            yearly_cumulative_cashflow_yuan=[0.0] * (params.lifespan_years + 1),
+        )
+
+    # 1. 初始投资增量 ΔCAPEX（元）
+    single_capex_delta = (
+        (spec.ev_vehicle_price_wan - spec.ice_vehicle_price_wan + spec.charger_cost_wan)
+        * 10000.0
+    )
+    delta_capex_total = single_capex_delta * replace_count
+
+    # 2. 燃料与电能单价确定
+    fuel_price = (
+        params.diesel_price_yuan_per_l
+        if spec.fuel_type == "柴油"
+        else params.gasoline_price_yuan_per_l
+    )
+
+    # 3. 单车年能耗成本计算
+    single_annual_fuel_cost = (annual_km / 100.0) * spec.fuel_consumption_per_100km * fuel_price
+    single_annual_elec_cost = (
+        (annual_km / 100.0)
+        * spec.electricity_consumption_per_100km
+        * params.electricity_price_yuan_per_kwh
+    )
+    single_annual_energy_saving = max(0.0, single_annual_fuel_cost - single_annual_elec_cost)
+
+    # 4. 单车年维保节省计算
+    single_annual_maint_saving = (
+        spec.annual_maintenance_ice_yuan * spec.maintenance_saving_ratio
+    )
+
+    # 5. 车队年运营节省 ΔOPEX（元/年）
+    annual_energy_saving_total = single_annual_energy_saving * replace_count
+    annual_maint_saving_total = single_annual_maint_saving * replace_count
+    annual_opex_saving_total = annual_energy_saving_total + annual_maint_saving_total
+
+    # 6. 静态投资回收期 T_payback（年）
+    payback_period: Optional[float] = None
+    if annual_opex_saving_total > 0:
+        payback_period = delta_capex_total / annual_opex_saving_total
+
+    # 7. 全周期总减碳量与折现净现值计算
+    lifespan_co2 = annual_co2_reduction_t * params.lifespan_years
+    r = params.discount_rate
+    n = params.lifespan_years
+
+    # 折现系数求和: Σ [1 / (1+r)^t]
+    if r > 0:
+        annuity_factor = (1.0 - (1.0 + r) ** (-n)) / r
+    else:
+        annuity_factor = float(n)
+
+    pv_opex_savings = annual_opex_saving_total * annuity_factor
+    lifespan_net_savings = pv_opex_savings - delta_capex_total
+
+    # 8. 单位吨碳减排边际成本 MAC (元/tCO2e)
+    mac: Optional[float] = None
+    if lifespan_co2 > 0:
+        # MAC = (ΔCAPEX - PV(ΔOPEX)) / 全周期总减碳量
+        mac = (delta_capex_total - pv_opex_savings) / lifespan_co2
+
+    # 9. 0~N 年累计净现金流序列（未折现静态现金流，直观展现回本点）
+    yearly_cashflow = [-delta_capex_total]
+    for year in range(1, n + 1):
+        yearly_cashflow.append(-delta_capex_total + year * annual_opex_saving_total)
+
+    return SingleVehicleTCOResult(
+        target_vehicle_type=vehicle_type,
+        replace_count=replace_count,
+        annual_km=annual_km,
+        delta_capex_total_yuan=delta_capex_total,
+        delta_capex_per_vehicle_yuan=single_capex_delta,
+        annual_fuel_cost_per_vehicle_yuan=single_annual_fuel_cost,
+        annual_elec_cost_per_vehicle_yuan=single_annual_elec_cost,
+        annual_energy_saving_total_yuan=annual_energy_saving_total,
+        annual_maintenance_saving_total_yuan=annual_maint_saving_total,
+        annual_opex_saving_total_yuan=annual_opex_saving_total,
+        payback_period_years=payback_period,
+        mac_yuan_per_tco2e=mac,
+        annual_co2_reduction_t=annual_co2_reduction_t,
+        lifespan_co2_reduction_t=lifespan_co2,
+        lifespan_net_savings_yuan=lifespan_net_savings,
+        yearly_cumulative_cashflow_yuan=yearly_cashflow,
+    )
+
+
+def calculate_fleet_tco(
+    replacements: List[Dict[str, Any]],
+    econ_params: Optional[TCOEconomicParameters] = None,
+) -> FleetTCOResult:
+    """计算整个车队新能源替换措施的综合 TCO 与投资决策。
+
+    Args:
+        replacements: [
+            {
+                "vehicle_type": "重型柴油货车",
+                "replace_count": 10,
+                "annual_km": 80000.0,
+                "annual_co2_reduction_t": 701.6,
+            }, ...
+        ]
+        econ_params: 通用宏观经济参数
+    """
+    params = econ_params or TCOEconomicParameters()
+    total_replace = 0
+    total_delta_capex = 0.0
+    total_annual_opex = 0.0
+    total_annual_energy = 0.0
+    total_annual_maint = 0.0
+    total_annual_co2 = 0.0
+    by_type: Dict[str, SingleVehicleTCOResult] = {}
+
+    for item in replacements:
+        vtype = item["vehicle_type"]
+        rcount = int(item.get("replace_count", 0))
+        km = float(item.get("annual_km", 80000.0))
+        co2_red = float(item.get("annual_co2_reduction_t", 0.0))
+
+        if rcount <= 0:
+            continue
+
+        res = calculate_single_vehicle_tco(
+            vehicle_type=vtype,
+            replace_count=rcount,
+            annual_km=km,
+            annual_co2_reduction_t=co2_red,
+            econ_params=params,
+        )
+        by_type[vtype] = res
+        total_replace += rcount
+        total_delta_capex += res.delta_capex_total_yuan
+        total_annual_opex += res.annual_opex_saving_total_yuan
+        total_annual_energy += res.annual_energy_saving_total_yuan
+        total_annual_maint += res.annual_maintenance_saving_total_yuan
+        total_annual_co2 += res.annual_co2_reduction_t
+
+    overall_payback: Optional[float] = None
+    if total_annual_opex > 0:
+        overall_payback = total_delta_capex / total_annual_opex
+
+    total_lifespan_co2 = total_annual_co2 * params.lifespan_years
+    r = params.discount_rate
+    n = params.lifespan_years
+
+    if r > 0:
+        annuity_factor = (1.0 - (1.0 + r) ** (-n)) / r
+    else:
+        annuity_factor = float(n)
+
+    pv_total_opex = total_annual_opex * annuity_factor
+    total_lifespan_net_savings = pv_total_opex - total_delta_capex
+
+    overall_mac: Optional[float] = None
+    if total_lifespan_co2 > 0:
+        overall_mac = (total_delta_capex - pv_total_opex) / total_lifespan_co2
+
+    # 全车队逐年累计现金流
+    yearly_cashflow = [-total_delta_capex]
+    for year in range(1, n + 1):
+        yearly_cashflow.append(-total_delta_capex + year * total_annual_opex)
+
+    return FleetTCOResult(
+        total_replace_count=total_replace,
+        total_delta_capex_yuan=total_delta_capex,
+        total_annual_opex_saving_yuan=total_annual_opex,
+        total_annual_energy_saving_yuan=total_annual_energy,
+        total_annual_maint_saving_yuan=total_annual_maint,
+        overall_payback_period_years=overall_payback,
+        total_annual_co2_reduction_t=total_annual_co2,
+        total_lifespan_co2_reduction_t=total_lifespan_co2,
+        overall_mac_yuan_per_tco2e=overall_mac,
+        total_lifespan_net_savings_yuan=total_lifespan_net_savings,
+        by_vehicle_type=by_type,
+        yearly_cashflow=yearly_cashflow,
+    )

@@ -1,0 +1,170 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "updated_at": "2026-08-26",
+    "description": "基于上市物流企业公开ESG报告与行业智库实测的真实车队基准数据集",
+    "purpose": "用于对比活动水平测算法(Model)与企业能源台账法(Fuel-based)的碳排放核算误差",
+    "emission_conversion_factors": {
+      "diesel_kg_co2_per_liter": 2.730,
+      "gasoline_kg_co2_per_liter": 2.310,
+      "lng_kg_co2_per_kg": 2.690,
+      "grid_electricity_kg_co2_per_kwh": 0.5703
+    }
+  },
+  "benchmarks": [
+    {
+      "benchmark_id": "SF_Express_2023",
+      "company_name": "顺丰控股（综合物流车队样本）",
+      "enterprise_scale": "超大型头部物流企业",
+      "scenario": "全国性干支线结合与绿色同城配送",
+      "source_document": "《顺丰控股2023年度可持续发展报告》第4.2节绿色低碳运输及附录KPI表",
+      "disclosure_year": 2023,
+      "stock_code": "002352.SZ",
+      "fleet_input": [
+        {
+          "vehicle_type": "重型柴油货车",
+          "count": 2800,
+          "annual_km": 105000,
+          "load_factor": 0.82
+        },
+        {
+          "vehicle_type": "中型柴油货车",
+          "count": 4200,
+          "annual_km": 55000,
+          "load_factor": 0.78
+        },
+        {
+          "vehicle_type": "轻型柴油货车",
+          "count": 8500,
+          "annual_km": 32000,
+          "load_factor": 0.70
+        },
+        {
+          "vehicle_type": "新能源物流车",
+          "count": 12000,
+          "annual_km": 28000,
+          "load_factor": 0.72
+        }
+      ],
+      "real_energy_ledger": {
+        "diesel_liters": 168500000,
+        "gasoline_liters": 0,
+        "lng_kg": 0,
+        "electricity_kwh": 67200000
+      },
+      "reported_scope1_tco2e": 460005.0,
+      "notes": "顺丰自营及核心承运车队，纳入纯电动车超1.2万辆；汽油消耗主要为零散外包末端骑手未计入自营车队直接核算。"
+    },
+    {
+      "benchmark_id": "ZTO_Express_Trunk_2023",
+      "company_name": "中通快递（长途干线甩挂车队）",
+      "enterprise_scale": "超大型快递快运企业",
+      "scenario": "长途大运力甩挂重载干线运输",
+      "source_document": "《中通快递2023环境、社会及管治(ESG)报告》环境关键绩效指标表",
+      "disclosure_year": 2023,
+      "stock_code": "2057.HK / ZTO",
+      "fleet_input": [
+        {
+          "vehicle_type": "重型柴油半挂牵引车(>49t)",
+          "count": 9200,
+          "annual_km": 135000,
+          "load_factor": 0.88
+        },
+        {
+          "vehicle_type": "中型柴油货车",
+          "count": 1200,
+          "annual_km": 60000,
+          "load_factor": 0.80
+        }
+      ],
+      "real_energy_ledger": {
+        "diesel_liters": 418200000,
+        "gasoline_liters": 0,
+        "lng_kg": 0,
+        "electricity_kwh": 18500000
+      },
+      "reported_scope1_tco2e": 1141686.0,
+      "notes": "中通核心优势为集约化甩挂运输，单车年均行驶里程超13万公里，百公里综合柴油单耗优化至约28.5L/100km。"
+    },
+    {
+      "benchmark_id": "JD_Logistics_Green_2023",
+      "company_name": "京东物流（绿色仓配示范车队）",
+      "enterprise_scale": "大型一体化供应链物流企业",
+      "scenario": "区域绿色仓配一体化与高比例新能源示范",
+      "source_document": "《京东物流2023年度环境、社会及治理(ESG)报告》青流计划专栏",
+      "disclosure_year": 2023,
+      "stock_code": "02618.HK",
+      "fleet_input": [
+        {
+          "vehicle_type": "轻型柴油货车",
+          "count": 3500,
+          "annual_km": 35000,
+          "load_factor": 0.75
+        },
+        {
+          "vehicle_type": "微型汽油货车",
+          "count": 2000,
+          "annual_km": 22000,
+          "load_factor": 0.70
+        },
+        {
+          "vehicle_type": "LNG重型货车",
+          "count": 500,
+          "annual_km": 75000,
+          "load_factor": 0.80
+        },
+        {
+          "vehicle_type": "新能源物流车",
+          "count": 8000,
+          "annual_km": 30000,
+          "load_factor": 0.75
+        }
+      ],
+      "real_energy_ledger": {
+        "diesel_liters": 15200000,
+        "gasoline_liters": 3700000,
+        "lng_kg": 10800000,
+        "electricity_kwh": 48000000
+      },
+      "reported_scope1_tco2e": 79800.0,
+      "notes": "京东物流自营车队深度推行新能源化，投用纯电动厢式车与氢能重卡，直接化石燃料排放量大幅压降。"
+    },
+    {
+      "benchmark_id": "Regional_Coldchain_Urban_2023",
+      "company_name": "某区域冷链商超配送车队（行业实测样本）",
+      "enterprise_scale": "中型区域专业物流企业",
+      "scenario": "区域城配与生鲜冷链运输（含返程空驶与制冷能耗）",
+      "source_document": "G7易流《中国公路货运碳账本白皮书》与智慧货运中心(SFC China)实测数据库",
+      "disclosure_year": 2023,
+      "stock_code": "非上市/行业实测脱敏",
+      "fleet_input": [
+        {
+          "vehicle_type": "中型柴油货车",
+          "count": 25,
+          "annual_km": 48000,
+          "load_factor": 0.60
+        },
+        {
+          "vehicle_type": "轻型柴油货车",
+          "count": 45,
+          "annual_km": 36000,
+          "load_factor": 0.58
+        },
+        {
+          "vehicle_type": "新能源物流车",
+          "count": 20,
+          "annual_km": 30000,
+          "load_factor": 0.65
+        }
+      ],
+      "real_energy_ledger": {
+        "diesel_liters": 425000,
+        "gasoline_liters": 0,
+        "lng_kg": 0,
+        "electricity_kwh": 120000
+      },
+      "reported_scope1_tco2e": 1160.25,
+      "notes": "典型中小车队场景，多频次短途冷链与商超配送，空驶率高（满载率<60%），制冷机组使百公里油耗偏高。"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import logging
 
 import streamlit as st
 
-from src.ui.components.charts import plot_reduction_comparison
+from src.ui.components.charts import plot_reduction_comparison, plot_tco_payback_curve, plot_tco_cost_breakdown
 from src.ui.navigation import navigate_to
 from src.ui.theme import empty_state, notice, page_header
 
@@ -170,7 +170,7 @@ def _calculate_reduction(
 
 def _render_scenario(scenario: dict) -> None:
     st.divider()
-    st.markdown("## 情景结果")
+    st.markdown("## 减排与环保账")
     savings = scenario.get("cost_savings", {})
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("情景直接排放", f"{scenario.get('scenario_emission', 0):,.0f} tCO2e")
@@ -186,6 +186,63 @@ def _render_scenario(scenario: dict) -> None:
         width="stretch",
         config={"displayModeBar": False, "responsive": True},
     )
+
+    # TCO 投资经济账与投资回收期模块
+    tco = scenario.get("tco_analysis")
+    if tco and tco.get("total_replace_count", 0) > 0:
+        st.markdown("## 💰 TCO 投资经济账与投资回收期（Payback Period）")
+        st.caption("全生命周期综合成本模型：TCO = CAPEX（购置+充电）+ OPEX（能耗+维保）- 残值")
+
+        tc1, tc2, tc3, tc4 = st.columns(4)
+        tc1.metric(
+            "初始增量投资 (ΔCAPEX)",
+            f"{tco.get('total_delta_capex_wan', 0):,.1f} 万元",
+            help="包含新能源车购车差额与充电桩配套分摊",
+        )
+        tc2.metric(
+            "年运营节省 (ΔOPEX)",
+            f"{tco.get('total_annual_opex_saving_wan', 0):,.1f} 万元/年",
+            help="燃油费节省 - 充电电费 + 年均维保节省",
+        )
+        payback = tco.get("overall_payback_period_years")
+        payback_str = f"{payback:.1f} 年" if payback is not None else "无法回本"
+        tc3.metric(
+            "静态投资回收期",
+            payback_str,
+            help="ΔCAPEX / ΔOPEX，代表多少年可通过运营节省收回购车增量成本",
+        )
+        mac = tco.get("overall_mac_yuan_per_tco2e")
+        mac_str = f"{mac:+.1f} 元/t" if mac is not None else "N/A"
+        tc4.metric(
+            "吨碳减排边际成本 (MAC)",
+            mac_str,
+            help="单位吨碳减排边际成本。负值代表全生命周期不仅减排，还能产生净经济收益",
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(
+                plot_tco_payback_curve(
+                    tco.get("yearly_cashflow", []),
+                    payback,
+                ),
+                width="stretch",
+                config={"displayModeBar": False, "responsive": True},
+            )
+        with c2:
+            single_tco_map = tco.get("by_vehicle_type", {})
+            vtype = scenario.get("selected_type", "重型柴油货车")
+            single_info = single_tco_map.get(vtype, {})
+            st.plotly_chart(
+                plot_tco_cost_breakdown(
+                    vtype,
+                    scenario.get("replace_count", 1),
+                    80000.0,
+                    single_info,
+                ),
+                width="stretch",
+                config={"displayModeBar": False, "responsive": True},
+            )
 
     st.markdown("### 已应用措施")
     applied = []

@@ -17,6 +17,7 @@ from typing import List, Optional
 from src.engine.calculator import VehicleGroupData, calculate_emission, calculate_load_adjustment
 from src.engine.quota import DEFAULT_SCENARIO_REDUCTION_TARGET, estimate_quota_gap
 from src.engine.carbon_price import estimate_compliance_cost, load_carbon_price_data
+from src.engine.tco import calculate_fleet_tco, calculate_single_vehicle_tco
 
 
 # ============================================================
@@ -61,6 +62,7 @@ class ReductionAnalysis:
     cost_savings: dict
     recommendations: list = field(default_factory=list)
     name: str = ""
+    tco_analysis: Optional[dict] = None
 
     def to_dict(self) -> dict:
         """序列化为字典，供API返回"""
@@ -72,6 +74,7 @@ class ReductionAnalysis:
             "reduction_pct": round(self.reduction_pct, 2),
             "cost_savings": self.cost_savings,
             "recommendations": self.recommendations,
+            "tco_analysis": self.tco_analysis,
         }
 
 
@@ -301,8 +304,29 @@ def analyze_reduction_scenario(
             "预算结余_t": scenario_cost.get("预算结余_t", 0),
         }
 
+        # 计算 TCO 投资经济账（当措施包含新能源替换时）
+    tco_analysis_dict = None
+    if any("新能源" in k for k in changes):
+        tco_replacements = []
+        for g in baseline_fleet:
+            if any("新能源" in k for k in changes):
+                # 获取该车型的替换数量
+                rcount = sum(c for k, c in changes.items() if "新能源" in k)
+                # 计算该车型被替换部分的单车年减排
+                ef_old = REPLACEMENT_MAP.get(g.vehicle_type, (None, 0.877))[1]
+                co2_red = (rcount * g.annual_km * ef_old) / 1000.0
+                tco_replacements.append({
+                    "vehicle_type": g.vehicle_type,
+                    "replace_count": min(rcount, g.count),
+                    "annual_km": g.annual_km,
+                    "annual_co2_reduction_t": co2_red,
+                })
+        if tco_replacements:
+            fleet_tco = calculate_fleet_tco(tco_replacements)
+            tco_analysis_dict = fleet_tco.to_dict()
+
     # 生成建议
-    recommendations = _generate_recommendations(baseline_fleet, changes, reduction_t, reduction_pct)
+    recommendations = _generate_recommendations(baseline_fleet, changes, reduction_t, reduction_pct, tco_analysis=tco_analysis_dict)
 
     return ReductionAnalysis(
         baseline_emission=baseline_emission,
@@ -311,6 +335,7 @@ def analyze_reduction_scenario(
         reduction_pct=reduction_pct,
         cost_savings=cost_savings,
         recommendations=recommendations,
+        tco_analysis=tco_analysis_dict,
     )
 
 
@@ -498,6 +523,7 @@ def _generate_recommendations(
     changes: dict,
     reduction_t: float,
     reduction_pct: float,
+    tco_analysis: Optional[dict] = None,
 ) -> list:
     """
     根据减排分析结果生成具体建议
@@ -533,6 +559,15 @@ def _generate_recommendations(
         recommendations.append(
             "新能源情景未计购电间接排放，需结合当地电网因子补充核算"
         )
+        if tco_analysis and tco_analysis.get("overall_payback_period_years") is not None:
+            payback = tco_analysis["overall_payback_period_years"]
+            capex = tco_analysis.get("total_delta_capex_wan", 0)
+            opex = tco_analysis.get("total_annual_opex_saving_wan", 0)
+            mac = tco_analysis.get("overall_mac_yuan_per_tco2e")
+            mac_str = f"，吨碳减排边际成本(MAC)为 {mac:+.1f} 元/tCO2e" if mac is not None else ""
+            recommendations.append(
+                f"TCO 投资评估：初始增量投资约 {capex:.1f} 万元，年均运营能耗与维保节省约 {opex:.1f} 万元，静态投资回收期约 {payback:.1f} 年{mac_str}。"
+            )
 
     # 如果有LNG替换措施
     if any("LNG" in k for k in changes):

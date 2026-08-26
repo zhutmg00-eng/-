@@ -210,3 +210,148 @@ def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
     )
     fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=MUTED)
     return fig
+
+
+def plot_tco_payback_curve(yearly_cashflow: List[float], payback_years: Optional[float] = None) -> go.Figure:
+    """绘制新能源替换逐年累计净现金流与静态投资回收期曲线。"""
+    if not yearly_cashflow:
+        fig = go.Figure()
+        _apply_layout(fig, title="投资现金流回收曲线", height=320)
+        return fig
+
+    # 转换为万元
+    cashflow_wan = [v / 10000.0 for v in yearly_cashflow]
+    years_labels = [f"第{i}年 (初始)" if i == 0 else f"第{i}年" for i in range(len(cashflow_wan))]
+
+    fig = go.Figure()
+
+    # 0 轴基准线
+    fig.add_trace(
+        go.Scatter(
+            x=[years_labels[0], years_labels[-1]],
+            y=[0, 0],
+            mode="lines",
+            line=dict(color=MUTED, width=1.5, dash="dash"),
+            name="盈亏平衡线",
+            hoverinfo="skip",
+        )
+    )
+
+    # 现金流折线与填充
+    fig.add_trace(
+        go.Scatter(
+            x=years_labels,
+            y=cashflow_wan,
+            mode="lines+markers+text",
+            name="累计净收益",
+            line=dict(color=GREEN, width=3),
+            marker=dict(size=8, color=[RED if v < 0 else GREEN for v in cashflow_wan]),
+            text=[f"{v:+,.1f}万" for v in cashflow_wan],
+            textposition="top center",
+            hovertemplate="%{x}<br>累计净收益: %{y:+,.2f} 万元<extra></extra>",
+        )
+    )
+
+    title_text = "新能源替换 · 投资回收现金流曲线"
+    if payback_years is not None:
+        title_text += f" (预计 {payback_years:.1f} 年回本)"
+
+    _apply_layout(fig, title=title_text, height=340)
+    fig.update_layout(
+        yaxis_title="累计净收益 (万元)",
+        showlegend=False,
+        margin=dict(l=40, r=30, t=58, b=40),
+    )
+    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=MUTED)
+    return fig
+
+
+def plot_tco_cost_breakdown(
+    vehicle_type: str,
+    replace_count: int,
+    annual_km: float,
+    single_tco: dict,
+    lifespan_years: int = 5,
+) -> go.Figure:
+    """对比单车或车队在运营周期内燃油车 vs 纯电车的 TCO 成本构成（CAPEX+能耗+维保）。"""
+    # 燃油车 5 年成本构成（万元）
+    # 单车初始购车
+    from src.engine.tco import get_tco_benchmark
+    spec = get_tco_benchmark(vehicle_type)
+    if not spec:
+        fig = go.Figure()
+        _apply_layout(fig, title="TCO 成本构成对比", height=320)
+        return fig
+
+    count = max(1, replace_count)
+    ice_capex = spec.ice_vehicle_price_wan * count
+    ev_capex = (spec.ev_vehicle_price_wan + spec.charger_cost_wan) * count
+
+    # 年能耗与维保费用
+    fuel_annual = (single_tco.get("annual_fuel_cost_per_vehicle_yuan", 0) * count) / 10000.0
+    elec_annual = (single_tco.get("annual_elec_cost_per_vehicle_yuan", 0) * count) / 10000.0
+    maint_ice_annual = (spec.annual_maintenance_ice_yuan * count) / 10000.0
+    maint_ev_annual = (spec.annual_maintenance_ice_yuan * (1 - spec.maintenance_saving_ratio) * count) / 10000.0
+
+    ice_fuel_total = fuel_annual * lifespan_years
+    ev_elec_total = elec_annual * lifespan_years
+    ice_maint_total = maint_ice_annual * lifespan_years
+    ev_maint_total = maint_ev_annual * lifespan_years
+
+    categories = [f"燃油车 (ICE) · {count}辆", f"纯电车 (EV) · {count}辆"]
+
+    fig = go.Figure()
+    # CAPEX
+    fig.add_trace(
+        go.Bar(
+            name="初始购置/建设 CAPEX",
+            x=categories,
+            y=[ice_capex, ev_capex],
+            marker_color="#4f6259",
+            text=[f"{ice_capex:,.1f}万", f"{ev_capex:,.1f}万"],
+            textposition="inside",
+            hovertemplate="%{x}<br>CAPEX: %{y:,.1f} 万元<extra></extra>",
+        )
+    )
+    # OPEX 能耗
+    fig.add_trace(
+        go.Bar(
+            name=f"{lifespan_years}年累计能耗支出",
+            x=categories,
+            y=[ice_fuel_total, ev_elec_total],
+            marker_color=AMBER,
+            text=[f"{ice_fuel_total:,.1f}万", f"{ev_elec_total:,.1f}万"],
+            textposition="inside",
+            hovertemplate="%{x}<br>能耗支出: %{y:,.1f} 万元<extra></extra>",
+        )
+    )
+    # OPEX 维保
+    fig.add_trace(
+        go.Bar(
+            name=f"{lifespan_years}年累计维保支出",
+            x=categories,
+            y=[ice_maint_total, ev_maint_total],
+            marker_color=TEAL,
+            text=[f"{ice_maint_total:,.1f}万", f"{ev_maint_total:,.1f}万"],
+            textposition="inside",
+            hovertemplate="%{x}<br>维保支出: %{y:,.1f} 万元<extra></extra>",
+        )
+    )
+
+    ice_sum = ice_capex + ice_fuel_total + ice_maint_total
+    ev_sum = ev_capex + ev_elec_total + ev_maint_total
+    savings = ice_sum - ev_sum
+
+    _apply_layout(
+        fig,
+        title=f"{lifespan_years}年 TCO 成本构成对比 (纯电比燃油省 {savings:,.1f} 万元)",
+        height=360,
+    )
+    fig.update_layout(
+        barmode="stack",
+        yaxis_title="总成本 (万元)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=35, r=20, t=75, b=40),
+    )
+    fig.update_yaxes(showgrid=True, gridcolor=GRID)
+    return fig

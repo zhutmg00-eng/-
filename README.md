@@ -101,7 +101,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 │   ├── models/                 # Pydantic 输入模型
 │   ├── rag/                    # 解析、混合检索与生成
 │   └── ui/                     # Streamlit 与 PDF 报告
-├── tests/                      # 61 项自动化测试
+├── tests/                      # 66 项自动化测试
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -148,6 +148,7 @@ B = sum(n_i * EF_i * d_reference_i * (1 - r_target)) / 1000
 python -m pytest -q
 python scripts\e2e_demo.py
 python scripts\test_rag_pipeline.py
+python scripts\verify_real_fleets.py
 ```
 
 RAG 验收包含两项硬性相关性断言：

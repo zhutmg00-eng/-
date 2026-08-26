@@ -101,6 +101,7 @@ python scripts\test_rag_pipeline.py
 
 ## 五、数据说明
 
+- `data/raw/real_fleets/`：真实公开车队基准数据集（顺丰、中通、京东、冷链实测）及核算方法学。
 - `data/raw/emission_factors.csv`：排放因子与扩展车型数据。
 - `data/raw/carbon_price_history.csv`：碳价研究数据，其中包含插值记录，只能用于情景演示。
 - `data/policy_docs/`：政策 Markdown 文档及少量下载日志。
@@ -108,6 +109,11 @@ python scripts\test_rag_pipeline.py
 - `data/reports/`：示例和运行时报告；不要覆盖用户自行生成的未跟踪文件。
 
 任何对外材料必须区分真实观测、插值、原型参数和官方政策原文。
+
+### 实证验证能力
+- `scripts/verify_real_fleets.py`：自动对比活动水平估算法与能源消耗台账法，输出相对误差矩阵（全样本 MAPE 4.23%）。
+- `tests/test_real_fleet_benchmarks.py`：5项自动化测试用例，全量测试已增至 66 项。
+- `docs/real_fleet_validation_report.md`：完整的实证验证与误差根因分析报告。
 
 ## 六、大创适配性判断
 

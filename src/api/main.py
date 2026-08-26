@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.models.fleet import FleetInput
 from src.models.policy import PolicyAnswer, PolicyQuestion
+from src.models.tco import VehicleTCORunRequest
 
 app = FastAPI(
     title="物流碳排放与减排情景决策助手 API",
@@ -208,3 +209,63 @@ async def ingest_document(
     advisor = PolicyAdvisor()
     count = advisor.ingest_document(str(safe_path), doc_date)
     return {"file": safe_path.name, "chunks_added": count}
+
+
+@app.get("/api/tco/defaults")
+async def get_tco_defaults(api_key: str = Depends(verify_api_key)):
+    """获取所有车型的 TCO 基准参数与宏观经济默认参数"""
+    from dataclasses import asdict
+    from src.engine.tco import DEFAULT_TCO_BENCHMARKS, TCOEconomicParameters
+    return {
+        "benchmarks": {k: asdict(v) for k, v in DEFAULT_TCO_BENCHMARKS.items()},
+        "economic_parameters": asdict(TCOEconomicParameters()),
+    }
+
+
+@app.post("/api/tco/calculate")
+async def calculate_tco_endpoint(payload: VehicleTCORunRequest, api_key: str = Depends(verify_api_key)):
+    """计算单个车型新能源替代的 TCO 经济账与投资回收期"""
+    from dataclasses import asdict
+    from src.engine.tco import (
+        DEFAULT_TCO_BENCHMARKS,
+        TCOEconomicParameters,
+        VehicleTCOBenchmark,
+        calculate_single_vehicle_tco,
+        get_tco_benchmark,
+    )
+
+    spec = get_tco_benchmark(payload.vehicle_type)
+    if spec is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"不支持的车型: {payload.vehicle_type}，支持的车型: {list(DEFAULT_TCO_BENCHMARKS.keys())}",
+        )
+
+    if payload.ev_vehicle_price_wan is not None:
+        spec = VehicleTCOBenchmark(
+            ice_vehicle_price_wan=spec.ice_vehicle_price_wan,
+            ev_vehicle_price_wan=payload.ev_vehicle_price_wan,
+            charger_cost_wan=spec.charger_cost_wan,
+            fuel_consumption_per_100km=spec.fuel_consumption_per_100km,
+            electricity_consumption_per_100km=spec.electricity_consumption_per_100km,
+            fuel_type=spec.fuel_type,
+            annual_maintenance_ice_yuan=spec.annual_maintenance_ice_yuan,
+            maintenance_saving_ratio=spec.maintenance_saving_ratio,
+        )
+
+    econ = TCOEconomicParameters(
+        diesel_price_yuan_per_l=payload.diesel_price_yuan_per_l or 7.50,
+        electricity_price_yuan_per_kwh=payload.electricity_price_yuan_per_kwh or 0.80,
+        lifespan_years=payload.lifespan_years or 5,
+    )
+
+    res = calculate_single_vehicle_tco(
+        vehicle_type=payload.vehicle_type,
+        replace_count=payload.replace_count,
+        annual_km=payload.annual_km,
+        annual_co2_reduction_t=payload.annual_co2_reduction_t,
+        custom_benchmark=spec,
+        econ_params=econ,
+    )
+
+    return asdict(res)
