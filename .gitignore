@@ -45,3 +45,7 @@ logs/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# 本地验收产物
+.playwright-cli/
+tmp/

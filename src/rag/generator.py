@@ -12,15 +12,17 @@ from src.config import LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, get_llm_confi
 # Prompt模板
 # ============================================================
 
-SYSTEM_PROMPT = """你是一位专业的碳交易政策顾问，服务于物流运输企业。
-你的职责是：基于提供的政策条款（检索结果）和企业数据（碳画像），为企业生成准确、可操作的碳合规建议。
+SYSTEM_PROMPT = """你是一位严谨的交通低碳政策研究助手，服务于物流运输企业。
+你的职责是：基于提供的政策条款（检索结果）和企业数据，为企业生成准确、可操作的政策分析与减排建议。
 
 请遵循以下原则：
 1. 只基于提供的政策条款内容作答，不要编造信息
 2. 如果检索到的政策条款不足以回答用户问题，请明确说明"根据当前检索结果，无法确定..."
 3. 引用政策时，注明来源文件名和发布日期
 4. 建议应具体、可执行，避免空泛的"应加强管理"类表述
-5. 回答格式：【政策依据】→【适用情况分析】→【建议措施】→【风险提示】"""
+5. 必须先判断政策适用范围；不得把发电、钢铁等行业的配额义务直接套用于物流企业
+6. 物流运输行业目前未纳入全国碳市场配额管理，不得宣称其模拟预算差额是法定配额、履约义务或可交易资产
+7. 回答格式：【政策依据】→【适用情况分析】→【建议措施】→【风险提示】"""
 
 
 def build_user_prompt(
@@ -47,20 +49,22 @@ def build_user_prompt(
         )
     context = "\n\n---\n\n".join(context_parts) if context_parts else "（未检索到相关政策条款）"
 
-    # 组装企业碳画像
+    # 兼容 API 当前结构和早期脚本中的平铺结构。
+    budget = carbon_profile.get("carbon_budget", {})
+    scenario_cost = carbon_profile.get("scenario_cost", {})
     profile_str = f"""企业类型: {carbon_profile.get('企业类型', '物流运输企业')}
-车队规模: {carbon_profile.get('总车辆数', '未知')} 辆
-年度碳排放基线: {carbon_profile.get('年度碳排放_t', '未知')} tCO₂
-碳配额缺口: {carbon_profile.get('配额缺口_t', '未知')} tCO₂
-缺口状态: {carbon_profile.get('缺口状态', '未知')}
-预估碳合规成本: {carbon_profile.get('预估成本_元', '未知')} 元"""
+车队规模: {carbon_profile.get('total_vehicles', carbon_profile.get('总车辆数', '未知'))} 辆
+年度直接运营排放: {carbon_profile.get('total_emission_t', carbon_profile.get('年度碳排放_t', '未知'))} tCO2e
+模拟碳预算差额: {budget.get('预算差额_t', carbon_profile.get('预算差额_t', '未知'))} tCO2e
+情景状态: {budget.get('状态', carbon_profile.get('情景状态', '未知'))}
+碳价对标情景成本: {scenario_cost.get('情景成本_参考价', carbon_profile.get('情景成本_元', '未知'))} 元"""
 
-    return f"""请根据以下政策条款，结合该企业的碳资产状况，回答企业的问题。
+    return f"""请根据以下政策条款，结合该企业的排放与减排情景，回答企业的问题。
 
 ====== 相关碳交易政策条款 ======
 {context}
 
-====== 企业碳资产状况 ======
+====== 企业排放与减排情景 ======
 {profile_str}
 
 ====== 企业问题 ======
@@ -68,9 +72,48 @@ def build_user_prompt(
 
 请按以下格式回答：
 【政策依据】列出适用的政策条款（注明来源文件名）
-【适用情况分析】结合该企业的具体排放数据和配额状况分析
-【建议措施】给出具体可执行的合规建议
-【风险提示】提醒潜在的合规风险和注意事项"""
+【适用情况分析】先判断政策是否适用于物流运输企业，再结合排放数据分析
+【建议措施】给出具体可执行的减排或数据管理建议
+【风险提示】说明政策适用边界、核算边界和信息时效性"""
+
+
+def build_retrieval_answer(
+    user_question: str,
+    retrieved_chunks: List[Dict],
+) -> str:
+    """在未配置 LLM 时生成可读、可追溯的检索式回答。"""
+    if not retrieved_chunks:
+        return (
+            "【检索结论】\n当前知识库未找到足够相关的政策资料，无法据此回答。\n\n"
+            "【风险提示】\n请补充权威来源并核实政策时效性后再作判断。"
+        )
+
+    top_source = retrieved_chunks[0].get("metadata", {}).get("source", "未知来源")
+    lines = [
+        "【检索结论】",
+        f"针对“{user_question}”，当前最相关的资料是《{top_source}》。以下为知识库原文摘录，未调用大模型扩写。",
+        "",
+        "【政策原文摘录】",
+    ]
+    seen_sources = set()
+    for chunk in retrieved_chunks[:3]:
+        metadata = chunk.get("metadata", {})
+        source = metadata.get("source", "未知来源")
+        date = metadata.get("date", "")
+        text = " ".join(chunk.get("text", "").split())
+        excerpt = text[:280] + ("..." if len(text) > 280 else "")
+        source_label = f"《{source}》" + (f"（{date}）" if date else "")
+        if source in seen_sources:
+            source_label += "（续）"
+        seen_sources.add(source)
+        lines.append(f"- {source_label}：{excerpt}")
+
+    lines.extend([
+        "",
+        "【适用性提示】",
+        "物流运输行业目前未纳入全国碳市场配额管理。检索到的发电、钢铁等行业履约规定不能直接作为物流企业的法定义务；本系统的模拟碳预算仅用于科研情景比较。",
+    ])
+    return "\n".join(lines)
 
 
 def call_llm(
@@ -78,6 +121,7 @@ def call_llm(
     user_prompt: str,
     model: str = None,
     temperature: float = None,
+    fallback_answer: str = "",
 ) -> str:
     """
     调用大语言模型API
@@ -96,12 +140,7 @@ def call_llm(
     # 检查API key
     api_key = config.get("api_key", "")
     if not api_key:
-        return (
-            "⚠️ LLM API密钥未配置，无法调用大模型生成回答。\n"
-            "请在 .env 文件中设置对应的API key（如 DEEPSEEK_API_KEY）。\n\n"
-            "以下是基于检索结果的关键政策条款摘要：\n"
-            f"{user_prompt[:500]}..."
-        )
+        return fallback_answer or "未配置 LLM API 密钥，当前仅提供政策检索结果。"
 
     try:
         from openai import OpenAI
@@ -147,8 +186,6 @@ def call_llm(
             break
 
     return (
-        f"⚠️ LLM调用失败: {last_error}\n"
-        "请检查API key配置和网络连接。\n\n"
-        "以下是基于检索结果的关键政策条款摘要：\n"
-        f"{user_prompt[:500]}..."
+        f"LLM 调用失败（{type(last_error).__name__}），已返回检索式回答。\n\n"
+        f"{fallback_answer or user_prompt[:500]}"
     )

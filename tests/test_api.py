@@ -42,18 +42,64 @@ class TestAPI:
         assert result["company_name"] == "测试物流公司"
         assert result["total_emission_t"] > 3000
         assert result["total_vehicles"] == 50
-        assert "缺口" in result["quota_gap"]["状态"] or "盈余" in result["quota_gap"]["状态"]
+        assert result["carbon_budget"]["状态"] in {"超出预算", "低于预算", "基本平衡"}
+        assert result["carbon_budget"]["模拟碳预算_t"] == 3600.0
+        assert "购电间接排放" in result["methodology_note"]
 
     def test_calculate_empty_fleet(self):
-        """空车队"""
+        """空车队应在进入计算引擎前被拒绝"""
         response = client.post("/api/calculate", json={
             "company_name": "空公司",
             "fleet": []
         })
-        assert response.status_code == 200
-        result = response.json()
-        assert result["total_emission_t"] == 0
-        assert result["total_vehicles"] == 0
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("count", -1),
+            ("annual_km", -100),
+            ("load_factor", 1.2),
+            ("load_factor", -0.1),
+        ],
+    )
+    def test_calculate_rejects_invalid_vehicle_values(self, field, value):
+        vehicle = {
+            "vehicle_type": "重型柴油货车",
+            "count": 1,
+            "annual_km": 10000,
+            "load_factor": 0.75,
+        }
+        vehicle[field] = value
+        response = client.post(
+            "/api/calculate",
+            json={"company_name": "边界测试", "fleet": [vehicle]},
+        )
+        assert response.status_code == 422
+
+    def test_calculate_rejects_unknown_vehicle_type(self):
+        response = client.post("/api/calculate", json={
+            "company_name": "未知车型测试",
+            "fleet": [{
+                "vehicle_type": "不存在的车型",
+                "count": 1,
+                "annual_km": 10000,
+                "load_factor": 0.75,
+            }],
+        })
+        assert response.status_code == 422
+
+    def test_calculate_rejects_blank_company_name(self):
+        response = client.post("/api/calculate", json={
+            "company_name": "   ",
+            "fleet": [{
+                "vehicle_type": "重型柴油货车",
+                "count": 1,
+                "annual_km": 10000,
+                "load_factor": 0.75,
+            }],
+        })
+        assert response.status_code == 422
 
     def test_calculate_mixed_fleet(self):
         """混合车队"""

@@ -5,7 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.rag.parser import clean_policy_text, chunk_policy_text
+from src.rag.generator import build_retrieval_answer
+from src.rag.parser import clean_policy_text, chunk_policy_text, parse_document
+from src.rag.vector_store import _lexical_relevance
 
 
 class TestParser:
@@ -14,6 +16,28 @@ class TestParser:
         raw = "第一行\n\n\n第二行\n\n第三行"
         cleaned = clean_policy_text(raw)
         assert "\n\n" not in cleaned
+
+    def test_parse_markdown_and_remove_web_footer_noise(self, tmp_path):
+        markdown = tmp_path / "policy.md"
+        markdown.write_text(
+            "# 交通运输碳达峰方案\n\n正文规定运输结构优化。\n"
+            "**URL**: https://example.com/policy\n版权所有：中国政府网\n"
+            "京ICP备05070218号\n网站标识码bm01000001\n",
+            encoding="utf-8",
+        )
+        raw = parse_document(markdown)
+        cleaned = clean_policy_text(raw)
+        assert "交通运输碳达峰方案" in cleaned
+        assert "运输结构优化" in cleaned
+        assert "版权所有" not in cleaned
+        assert "ICP备" not in cleaned
+        assert "网站标识码" not in cleaned
+        assert "example.com" not in cleaned
+
+    def test_clean_deduplicates_repeated_long_lines(self):
+        line = "这是一条被网页抓取结果重复保存的较长政策正文内容。"
+        cleaned = clean_policy_text(f"{line}\n{line}")
+        assert cleaned.count(line) == 1
 
     def test_chunk_size(self):
         """chunk大小不超过设定值太多"""
@@ -40,12 +64,38 @@ class TestParser:
 
 
 class TestVectorStore:
-    def test_init(self):
+    def test_init(self, tmp_path):
         """向量库应能初始化"""
         from src.rag.vector_store import PolicyVectorStore
-        vs = PolicyVectorStore(persist_dir="/tmp/test_chroma_db")
+        vs = PolicyVectorStore(persist_dir=str(tmp_path / "test_chroma_db"))
         stats = vs.get_stats()
         assert "total_chunks" in stats
-        # 清理
-        import shutil
-        shutil.rmtree("/tmp/test_chroma_db", ignore_errors=True)
+        assert "embedding_model" in stats
+
+    def test_transport_title_receives_higher_lexical_score(self):
+        query = "交通运输行业碳达峰目标"
+        transport = _lexical_relevance(
+            query,
+            "推动交通运输绿色低碳转型，助力实现碳达峰目标。",
+            "交通运输碳达峰实施方案.md",
+        )
+        trading = _lexical_relevance(
+            query,
+            "重点排放单位应当按时清缴碳排放配额。",
+            "碳排放权交易管理办法.md",
+        )
+        assert transport > trading
+
+
+def test_retrieval_fallback_is_an_actual_sourced_answer():
+    answer = build_retrieval_answer(
+        "交通运输碳达峰目标是什么",
+        [{
+            "text": "交通运输行业要加快形成绿色低碳运输方式。",
+            "metadata": {"source": "交通运输碳达峰实施方案.md", "date": "2022"},
+        }],
+    )
+    assert "政策原文摘录" in answer
+    assert "交通运输碳达峰实施方案.md" in answer
+    assert "物流运输行业目前未纳入" in answer
+    assert "请在 .env" not in answer

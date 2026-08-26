@@ -135,20 +135,20 @@ class TestQuotaGap:
         result = estimate_quota_gap(4000.0, fleet_summary)
         # 配额 = 50 × 72 = 3600
         assert result.gap_t == 400.0
-        assert result.gap_status == "缺口"
+        assert result.gap_status == "超出预算"
 
     def test_gap_negative(self):
         """排放<配额 → 盈余"""
         fleet_summary = {"重型柴油货车": 50}
         result = estimate_quota_gap(3000.0, fleet_summary)
         assert result.gap_t == -600.0
-        assert result.gap_status == "盈余"
+        assert result.gap_status == "低于预算"
 
     def test_gap_balanced(self):
         """排放≈配额 → 平衡"""
         fleet_summary = {"重型柴油货车": 50}
         result = estimate_quota_gap(3600.0, fleet_summary)
-        assert result.gap_status == "平衡"
+        assert result.gap_status == "基本平衡"
 
     def test_ev_no_quota(self):
         """新能源物流车配额基准为0"""
@@ -163,17 +163,20 @@ class TestCarbonPrice:
     def test_positive_gap_with_mock_price(self):
         """有缺口时返回成本估算"""
         result = estimate_compliance_cost(1000.0, None)
-        assert result["合规需求"] == "需购买配额"
-        assert result["配额缺口_t"] == 1000.0
-        assert result["预估合规成本_参考价"] > 0
+        assert result["情景判断"] == "超出模拟碳预算"
+        assert result["预算差额_t"] == 1000.0
+        assert result["情景成本_参考价"] > 0
+        assert "不代表" in result["备注"]
 
     def test_negative_gap(self):
         """盈余时返回收益估算"""
         result = estimate_compliance_cost(-500.0, None)
-        assert result["合规需求"] == "配额盈余"
-        assert result["预估收益_low"] > 0
+        assert result["情景判断"] == "低于模拟碳预算"
+        assert result["潜在价值_low"] > 0
+        assert "不代表" in result["备注"]
 
     def test_zero_gap(self):
         """零缺口时也返回盈余"""
         result = estimate_compliance_cost(0.0, None)
-        assert "盈余" in result["合规需求"]
+        assert result["情景判断"] == "基本平衡"
+        assert result["预算结余_t"] == 0

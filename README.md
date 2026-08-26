@@ -1,200 +1,170 @@
-# 碳资产管理与智能合规决策助手
+# 物流碳排放与减排情景决策助手
 
-> 面向物流企业的碳资产管理工具 — 碳排放基线测算 + 碳交易政策智能顾问
+> 面向物流运输企业的大学生创新训练科研原型：直接运营排放核算、减排情景分析与政策资料检索。
 
-## 项目简介
+## 项目定位
 
-本项目是一个面向物流运输企业的碳资产管理工具，帮助企业完成：
-1. **碳排放基线测算** — 输入车队参数，输出年度碳排放量、配额缺口、预估合规成本
-2. **碳交易政策智能问答** — 基于RAG技术，用自然语言查询碳交易政策法规
-3. **碳资产可视化看板** — Streamlit前端展示企业碳资产全景
+本项目输入车型、车辆数、年均里程和满载率，输出车辆直接运营排放基线，并通过模拟碳预算比较不同减排情景。政策助手使用本地政策知识库检索相关原文；配置 LLM 后可在检索内容范围内生成分析，未配置时返回带来源的原文摘录。
+
+本项目适合作为大创项目的前提，是将研究重点放在“物流企业排放核算与政策检索方法验证”，而不是宣称已经提供法定碳资产管理或履约服务。
+
+> 重要边界：物流运输行业目前未纳入全国碳市场配额管理。系统中的模拟碳预算、预算差额、情景成本和潜在价值仅用于科研比较，不代表法定配额、履约义务、可交易资产或实际收益。新能源物流车当前仅按直接运营排放为零核算，未计购电间接排放及车辆全生命周期排放。
+
+## 当前功能
+
+- 车队直接运营排放核算，支持 6 类内置车型及 CSV 扩展
+- 模拟碳预算差额与碳价对标情景
+- 新能源替代、满载率提升和组合减排情景
+- ChromaDB 语义召回与中文标题/关键词混合重排
+- PDF、DOCX、HTML、Markdown、TXT 政策文档解析与网页噪声清洗
+- 无 LLM 密钥时的可追溯检索式回答
+- FastAPI、Streamlit、PDF 报告、多企业对比和 Docker Compose 部署
+- 输入边界校验、API Key、CORS、路径范围校验和自动化测试
 
 ## 快速开始
 
-### 环境要求
+要求 Python 3.10 及以上版本。
 
-- Python 3.10+
-- 网络连接（用于下载依赖和调用LLM API）
+```powershell
+git clone https://github.com/zhutmg00-eng/-.git carbon-logistics-assistant
+cd carbon-logistics-assistant
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m pytest -q
+```
 
-### 安装步骤
+启动后端和前端：
 
-```bash
-# 1. 克隆/解压项目
-tar xzf carbon-asset-assistant-phase1-complete.tar.gz
-cd carbon-asset-assistant
-
-# 2. 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. 安装依赖
-pip install -r requirements.txt
-
-# 4. 配置环境变量
-cp .env.example .env
-# 编辑 .env 填入 API 密钥（至少配置一个LLM API key）
-
-# 5. 运行测试（验证安装成功）
-python3 -m pytest tests/test_calculator.py tests/test_api.py -v
-# 预期输出: 25 passed
-
-# 6. 启动后端 API
+```powershell
+# 终端 1
 uvicorn src.api.main:app --reload --port 8000
 
-# 7. 启动前端（新终端）
+# 终端 2
 streamlit run src/ui/app.py
 ```
 
-### 环境变量说明
+- Web：`http://localhost:8501`
+- API 文档：`http://localhost:8000/docs`
+- 健康检查：`http://localhost:8000/api/health`
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DEEPSEEK_API_KEY` | DeepSeek API密钥（推荐，性价比最高） | 空 |
-| `DASHSCOPE_API_KEY` | 阿里通义千问API密钥 | 空 |
-| `ZHIPU_API_KEY` | 智谱GLM API密钥 | 空 |
-| `OPENAI_API_KEY` | OpenAI API密钥（用于Embedding） | 空 |
-| `LLM_MODEL` | 默认使用的模型 | `deepseek-chat` |
-| `CORS_ORIGINS` | CORS允许的前端来源（逗号分隔） | `http://localhost:8501,http://localhost:3000` |
-| `APP_API_KEY` | API鉴权密钥（留空=开发模式不鉴权） | 空 |
+开发环境不设置 `APP_API_KEY` 时，API 进入无鉴权模式。设置密钥后，前端和请求方都需发送同一 `X-API-Key`。
+
+## Docker
+
+```powershell
+# 开发环境，默认使用 dev-key
+docker compose up --build
+
+# 生产覆盖配置
+Copy-Item .env.example .env
+# 修改 .env 中 APP_API_KEY 和 CORS_ORIGINS
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+```
+
+生产配置要求显式提供 `APP_API_KEY` 和 `CORS_ORIGINS`，并保持 Streamlit XSRF 防护开启。
+
+## 环境变量
+
+| 变量 | 用途 | 默认值 |
+|---|---|---|
+| `APP_API_KEY` | FastAPI 与 Streamlit 间的共享密钥 | 空，开发模式不鉴权 |
+| `API_BASE_URL` | Streamlit 调用的后端地址 | `http://localhost:8000` |
+| `CORS_ORIGINS` | 允许的浏览器来源，逗号分隔 | 本地地址 |
+| `LLM_MODEL` | 政策分析模型 | `deepseek-chat` |
+| `DEEPSEEK_API_KEY` | DeepSeek 密钥，可选 | 空 |
+| `DASHSCOPE_API_KEY` | 通义千问密钥，可选 | 空 |
+| `ZHIPU_API_KEY` | 智谱密钥，可选 | 空 |
+| `OPENAI_API_KEY` | OpenAI LLM 或 Embedding 密钥，可选 | 空 |
+| `EMBEDDING_MODEL` | Chroma 嵌入函数 | `chromadb-default` |
+
+`EMBEDDING_MODEL` 可设为 `chromadb-default`、`openai:text-embedding-3-small`、`bge-local` 或 `sentence-transformers:<model>`。OpenAI 模式必须同时设置 `OPENAI_API_KEY`。
 
 ## 项目结构
 
-```
-carbon-asset-assistant/
-├── data/                        # 数据目录
-│   ├── raw/                     # 原始数据
-│   │   ├── emission_factors.csv       # 排放因子数据库（19条）
-│   │   ├── carbon_price_history.csv   # 碳价历史数据（274条）
-│   │   ├── emission_factors_research.json  # 排放因子研究来源
-│   │   ├── carbon_price_sources.json        # 碳价数据来源
-│   │   ├── literature_review_raw.json      # 18篇文献数据
-│   │   └── policy_docs_catalog.json         # 政策文档目录
-│   ├── policy_docs/             # 政策文档库（37份，412KB）
-│   └── chroma_db/               # ChromaDB向量数据库（运行时生成）
+```text
+.
+├── data/
+│   ├── raw/                    # 排放因子、碳价与研究来源
+│   ├── policy_docs/            # 政策 Markdown 文档
+│   ├── chroma_db/              # 运行时生成，不提交
+│   └── reports/                # 示例及运行时 PDF
+├── docs/                       # 架构、文献、开题和审查资料
+├── scripts/
+│   ├── e2e_demo.py             # 计算链路端到端演示
+│   ├── ingest_policy_docs.py   # 政策知识库入库
+│   └── test_rag_pipeline.py    # RAG 相关性验收
 ├── src/
-│   ├── config.py                # 全局配置
-│   ├── models/                  # 数据模型（Pydantic）
-│   │   ├── fleet.py             # 车队模型
-│   │   ├── carbon.py            # 碳排放结果模型
-│   │   └── policy.py            # 政策问答模型
-│   ├── engine/                  # 碳排放计算引擎
-│   │   ├── emission_factors.py  # 排放因子数据库（CSV加载+内置fallback）
-│   │   ├── calculator.py        # 碳排放基线计算
-│   │   ├── quota.py             # 配额缺口估算
-│   │   ├── carbon_price.py      # 碳价参考与成本预测
-│   │   └── __init__.py          # 引擎统一导出
-│   ├── rag/                     # RAG政策解析助手（自研链路）
-│   │   ├── crawler.py           # 政策文档爬取
-│   │   ├── parser.py            # 文档解析(PDF/DOCX/HTML) + 清洗 + 切分
-│   │   ├── vector_store.py      # 向量知识库（ChromaDB优先，TF-IDF fallback）
-│   │   ├── generator.py         # Prompt模板 + LLM调用（含错误处理）
-│   │   └── __init__.py          # RAG统一入口（PolicyAdvisor）
-│   ├── api/                     # FastAPI后端
-│   │   └── main.py              # API入口（含CORS、鉴权、路径校验）
-│   └── ui/                      # Streamlit前端
-│       └── app.py               # 主入口（5个页面）
-├── tests/                       # 测试
-│   ├── test_calculator.py       # 计算引擎测试（20个）
-│   ├── test_api.py              # API测试（5个）
-│   └── test_rag.py              # RAG测试
-├── scripts/                     # 工具脚本
-│   ├── e2e_demo.py              # 端到端演示
-│   ├── test_rag_pipeline.py     # RAG链路测试
-│   ├── ingest_policy_docs.py    # 政策文档入库脚本
-│   ├── download_attachments.py  # PDF附件下载
-│   ├── fetch_mee_pages.py       # 生态环境部页面抓取
-│   └── baidu_search.py          # 百度搜索辅助脚本
-├── docs/                        # 文档
-│   ├── architecture.md          # 系统架构文档
-│   ├── literature_review.md     # 文献综述（18篇，24KB）
-│   ├── 开题报告.md              # 开题报告（22KB）
-│   └── code_review_report.md   # 代码审查报告（543行）
-├── requirements.txt             # Python依赖
-├── .env.example                 # 环境变量模板
-├── .gitignore                   # Git忽略规则
-└── README.md                    # 本文件
+│   ├── api/                    # FastAPI 与多企业对比
+│   ├── engine/                 # 排放、预算、碳价和减排引擎
+│   ├── models/                 # Pydantic 输入模型
+│   ├── rag/                    # 解析、混合检索与生成
+│   └── ui/                     # Streamlit 与 PDF 报告
+├── tests/                      # 50 项自动化测试
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 技术栈
-
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| 后端API | FastAPI | 高性能异步框架，自动生成OpenAPI文档 |
-| 前端 | Streamlit | 快速原型开发，适合数据应用 |
-| 计算引擎 | Python标准库 | 纯Python实现，无额外依赖 |
-| RAG链路 | 自研 | parser→vector_store→generator，不依赖LangChain |
-| 向量数据库 | ChromaDB | 本地持久化，支持语义检索（可选，未安装时降级为TF-IDF） |
-| 数据模型 | Pydantic v2 | 类型安全，自动校验 |
-| PDF解析 | PyMuPDF | 高性能PDF文本提取 |
-| LLM | DeepSeek/Qwen/GLM | 国产模型优先，通过OpenAI兼容接口调用 |
-
-## API接口
+## API
 
 | 方法 | 路径 | 说明 | 鉴权 |
-|------|------|------|------|
+|---|---|---|---|
 | GET | `/api/health` | 健康检查 | 否 |
-| GET | `/api/vehicle-types` | 获取支持的车型列表 | 是 |
-| POST | `/api/calculate` | 计算碳排放基线+配额+成本 | 是 |
-| POST | `/api/ask` | 碳交易政策智能问答 | 是 |
-| GET | `/api/kb/stats` | 知识库统计 | 是 |
-| POST | `/api/kb/ingest` | 导入政策文档到知识库 | 是 |
+| GET | `/api/vehicle-types` | 支持车型和排放因子 | 是 |
+| POST | `/api/calculate` | 直接运营排放、模拟预算和情景成本 | 是 |
+| POST | `/api/compare` | 多企业情景对比 | 是 |
+| POST | `/api/ask` | 政策检索与问答 | 是 |
+| GET | `/api/kb/stats` | 知识库状态 | 是 |
+| POST | `/api/kb/ingest` | 导入 `data/policy_docs` 内文档 | 是 |
 
-## 核心计算公式
+无效车辆数、里程、满载率、企业名、空车队和未知车型统一返回 `422`。
 
-### 碳排放基线
+## 计算口径
+
+直接运营排放：
+
+```text
+E = sum(n_i * d_i * EF_i * LF_i) / 1000
 ```
-E = Σ (n_i × d_i × EF_i × LF_i) / 1000
 
-  n_i  = 第i类车型数量（辆）
-  d_i  = 年均运营里程（km/年）
-  EF_i = CO₂排放因子（kgCO₂/km）
-  LF_i = 满载率调整系数 = 1 + 0.15×(0.75 - l_i)
-```
+- `n_i`：车型数量
+- `d_i`：年均运营里程
+- `EF_i`：车辆直接排放因子
+- `LF_i`：低满载率调整系数
 
-### 配额缺口
-```
+模拟碳预算差额：
+
+```text
 Gap = E - Q
-Q = Σ (n_i × q_benchmark_i × adjustment_factor)
-
-  q_benchmark = 行业基准值（tCO₂/辆/年），原型验证用估算值
+Q = sum(n_i * q_benchmark_i * adjustment_factor)
 ```
 
-### 碳合规成本
-```
-Cost = max(Gap, 0) × P_current
-Cost_low  = max(Gap, 0) × P_min(近90日)
-Cost_high = max(Gap, 0) × P_max(近90日)
-```
+`Q` 是项目原型基准，不是官方分配的免费配额。情景金额使用全国碳市场历史价格作对标，不能解释为物流企业当前履约成本或确定收益。
 
-## 数据资产
+## 验证
 
-| 数据集 | 记录数 | 来源 |
-|--------|--------|------|
-| 排放因子 | 19条 | 蔡博峰等(2021)中国环境科学 + GB 30510-2024 |
-| 碳价历史 | 274条 | 上海环交所周度数据（73真实+201插值） |
-| 政策文档 | 37份 | 生态环境部、国务院、交通运输部等 |
-| 文献数据 | 18篇 | 交通碳排放、碳交易、RAG三个方向 |
-
-## 团队
-
-- **陈铭浩**（负责人）— 系统架构、RAG、API开发
-- **张可为** — 文献综述、碳配额规则、验证
-- **王逸贤** — 排放因子数据、代码实现、测试
-- **汪晓霞**（指导教师）— 技术指导
-
-## 测试
-
-```bash
-# 运行全部测试
-python3 -m pytest tests/ -v
-
-# 运行端到端演示
-python3 scripts/e2e_demo.py
-
-# 运行RAG链路测试
-python3 scripts/test_rag_pipeline.py
+```powershell
+python -m pytest -q
+python scripts\e2e_demo.py
+python scripts\test_rag_pipeline.py
 ```
 
-## 许可证
+RAG 验收包含两项硬性相关性断言：
 
-本项目为大学生创新创业训练计划项目，仅供学术研究使用。
+- “物流运输工具碳排放怎么核算”首条命中运输工具核算方法
+- “交通运输行业碳达峰目标”首条命中交通运输碳达峰实施方案
+
+PDF 测试会检查预算字段、科研免责声明、新能源核算边界、页码和字体兼容单位。
+
+## 下一阶段研究重点
+
+1. 获取匿名化真实车队或公开统计样本，比较模型结果与企业燃料台账/标准方法结果。
+2. 建立 30 至 50 道带标准来源和适用范围标签的政策问题集，比较纯向量、关键词和混合检索。
+3. 报告 Recall@k、MRR、来源准确率、适用范围判断准确率和回答忠实度，不只展示案例。
+4. 将购电间接排放、运输周转量和不确定性区间纳入模型，并对排放因子和满载率参数做敏感性分析。
+5. 让指导教师、物流企业人员或相关专业教师进行盲评，保留评价表和迭代记录作为结题证据。
+
+## 许可
+
+本项目为大学生创新创业训练计划科研原型，仅供教学和研究使用。

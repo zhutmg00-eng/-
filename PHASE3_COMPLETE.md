@@ -1,5 +1,7 @@
 # Phase 3 完成汇总
 
+> 历史记录：当前“模拟碳预算/情景成本”口径及验证状态以 `README.md` 和 `HANDOVER.md` 为准。
+
 **阶段**: Phase 3 — Streamlit 可视化 + PDF报告 + 多企业对比 + 减排分析 + Docker部署
 **完成日期**: 2026-08-25
 

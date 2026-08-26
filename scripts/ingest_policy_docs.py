@@ -40,30 +40,17 @@ def ingest_all():
         
         print(f"\n📄 {md_file.name}")
         
-        # 读取文件内容
-        text = md_file.read_text(encoding="utf-8")
-        if len(text) < 100:
-            print(f"  ⏭️  内容过短，跳过")
-            continue
-        
-        # 用parser切分
-        from src.rag.parser import chunk_policy_text
-        chunks = chunk_policy_text(
-            text,
-            doc_source=md_file.name,
-            doc_date="",
-        )
-        
-        if not chunks:
-            print(f"  ⏭️  无有效chunk，跳过")
-            continue
-        
         # 提取日期（从文件名或内容中）
         date = ""
         for kw in ["2026", "2025", "2024", "2023", "2022", "2021", "2020"]:
             if kw in md_file.name:
                 date = kw
                 break
+
+        chunks = process_document(md_file, date)
+        if not chunks:
+            print("  ⏭️  无有效内容，跳过")
+            continue
         
         vs.add_documents(chunks, md_file.name, date)
         total_chunks += len(chunks)

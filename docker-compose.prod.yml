@@ -9,10 +9,10 @@ services:
     ports:
       - "0.0.0.0:8000:8000"  # 绑定所有网卡
     environment:
-      # 允许所有来源（内网穿透场景）
-      - CORS_ORIGINS=*
+      # 明确填写实际前端来源，多个来源以逗号分隔。
+      - CORS_ORIGINS=${CORS_ORIGINS:?请在.env中设置CORS_ORIGINS}
       # API Key（生产环境必须设置）
-      - APP_API_KEY=${APP_API_KEY:-}
+      - APP_API_KEY=${APP_API_KEY:?请在.env中设置APP_API_KEY}
       # 生产环境日志
       - LOG_LEVEL=info
 
@@ -21,5 +21,6 @@ services:
       - "0.0.0.0:8501:8501"  # 绑定所有网卡
     environment:
       - API_BASE_URL=http://api:8000
+      - APP_API_KEY=${APP_API_KEY:?请在.env中设置APP_API_KEY}
       - STREAMLIT_SERVER_HEADLESS=true
-      - STREAMLIT_SERVER_ENABLE_XSrf_PROTECTION=false
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true

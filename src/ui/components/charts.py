@@ -70,7 +70,7 @@ def plot_emission_pie(emission_by_type: dict) -> go.Figure:
         height=420,
         margin=dict(l=20, r=20, t=60, b=20),
     )
-    fig.update_traces(textinfo="percent", hovertemplate="%{label}<br>%{value:.2f} tCO₂<br>%{percent:.1f}")
+    fig.update_traces(textinfo="percent", hovertemplate="%{label}<br>%{value:.2f} tCO2e<br>%{percent:.1f}")
     return fig
 
 
@@ -79,17 +79,17 @@ def plot_emission_pie(emission_by_type: dict) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def plot_quota_comparison(total_emission: float, total_quota: float, gap: float) -> go.Figure:
-    """绘制企业排放量、配额总量与缺口的对比柱状图。
+    """绘制企业直接运营排放、模拟碳预算与差额的对比柱状图。
 
     Args:
-        total_emission: 企业年度碳排放总量 (tCO₂)。
-        total_quota: 企业免费配额总量 (tCO₂)。
-        gap: 配额缺口（正 = 需购买，负 = 盈余）。
+        total_emission: 企业年度直接运营排放总量 (tCO2e)。
+        total_quota: 企业模拟碳预算 (tCO2e)。
+        gap: 预算差额（正 = 超出预算，负 = 低于预算）。
 
     Returns:
         plotly 柱状图 figure。
     """
-    labels = ["排放量", "配额总量", "缺口"]
+    labels = ["直接运营排放", "模拟碳预算", "预算差额"]
     values = [total_emission, total_quota, gap]
     colors = ["#388e3c", "#1565c0"]
     # 缺口用红色高亮：正缺口(需购买)为红色，负缺口(盈余)为橙色
@@ -115,13 +115,13 @@ def plot_quota_comparison(total_emission: float, total_quota: float, gap: float)
 
     fig.update_layout(
         title={
-            "text": "📊 碳排放与配额对比",
+            "text": "📊 直接运营排放与模拟碳预算",
             "y": 0.95,
             "x": 0.5,
             "xanchor": "center",
             "yanchor": "top",
         },
-        yaxis_title="tCO₂",
+        yaxis_title="tCO2e",
         xaxis_tickfont=dict(size=12),
         height=400,
         margin=dict(l=20, r=20, t=60, b=50),
@@ -238,7 +238,7 @@ def plot_carbon_price_stats(price_stats: dict) -> go.Figure | None:
 # ---------------------------------------------------------------------------
 
 def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
-    """绘制多企业碳排放、配额与缺口的分组对比柱状图。
+    """绘制多企业直接运营排放、模拟碳预算与差额对比图。
 
     Args:
         multi_results: 每个企业的结果 dict，格式：
@@ -263,8 +263,8 @@ def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
 
     companies = [r.get("company_name", "未知") for r in multi_results]
     emissions = [r.get("total_emission_t", 0) for r in multi_results]
-    quotas = [r.get("total_quota_t", 0) for r in multi_results]
-    gaps = [r.get("gap_t", 0) for r in multi_results]
+    quotas = [r.get("carbon_budget_t", r.get("total_quota_t", 0)) for r in multi_results]
+    gaps = [r.get("budget_gap_t", r.get("gap_t", 0)) for r in multi_results]
 
     fig = go.Figure()
 
@@ -278,7 +278,7 @@ def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
         textfont=dict(size=11),
     ))
     fig.add_trace(go.Bar(
-        name="配额总量",
+        name="模拟碳预算",
         x=companies,
         y=quotas,
         marker_color="#1565c0",
@@ -287,7 +287,7 @@ def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
         textfont=dict(size=11),
     ))
     fig.add_trace(go.Bar(
-        name="缺口",
+        name="预算差额",
         x=companies,
         y=gaps,
         marker_color=["#d32f2f" if g > 0 else "#f57c00" for g in gaps],
@@ -298,14 +298,14 @@ def plot_fleet_comparison(multi_results: List[dict]) -> go.Figure:
 
     fig.update_layout(
         title={
-            "text": "🏭 多企业碳排放与配额对比",
+            "text": "🏭 多企业直接运营排放与模拟碳预算",
             "y": 0.95,
             "x": 0.5,
             "xanchor": "center",
             "yanchor": "top",
         },
         barmode="group",
-        yaxis_title="tCO₂",
+        yaxis_title="tCO2e",
         height=420,
         margin=dict(l=20, r=20, t=60, b=80),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),

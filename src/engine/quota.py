@@ -1,16 +1,16 @@
-"""碳配额缺口估算
+"""物流企业模拟碳预算差额估算。
 
-配额计算公式：
+预算计算公式：
     Q = Σ (n_i × q_benchmark_i × adjustment_factor)
     Gap = E - Q
 
-    若 Gap > 0 → 配额缺口，需购买
-    若 Gap < 0 → 配额盈余，可出售
+Q 仅用于科研原型的减排情景对标，不是法定碳配额。物流运输行业目前
+未纳入全国碳市场配额管理，因此差额不代表履约义务或可交易资产。
 """
 from dataclasses import dataclass
 
 # ============================================================
-# 配额基准值（tCO₂/辆/年）
+# 模拟碳预算基准值（tCO2e/辆/年）
 #
 # ⚠️ 注意：以下为原型验证用估算值，非官方配额分配数据。
 # 物流运输行业尚未纳入全国碳市场配额管理，以下基准值
@@ -42,28 +42,28 @@ ADJUSTMENT_FACTOR = 1.0
 
 @dataclass
 class QuotaGapResult:
-    """配额缺口结果"""
-    total_quota_t: float       # 免费配额总量 (tCO₂)
-    total_emission_t: float    # 实际排放 (tCO₂)
-    gap_t: float               # 缺口（正=需购买，负=盈余）
-    gap_status: str            # "缺口" | "盈余" | "平衡"
-    quota_by_type: dict        # 分车型配额明细
+    """模拟碳预算差额结果（保留旧字段名以兼容现有计算代码）。"""
+
+    total_quota_t: float       # 模拟碳预算总量 (tCO2e)
+    total_emission_t: float    # 直接运营排放 (tCO2e)
+    gap_t: float               # 差额（正=超出预算，负=低于预算）
+    gap_status: str            # "超出预算" | "低于预算" | "基本平衡"
+    quota_by_type: dict        # 分车型模拟预算明细
 
 
 def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapResult:
     """
-    估算企业碳配额缺口
+    估算企业直接运营排放与模拟碳预算的差额。
 
     Args:
-        emission_total: 企业年度碳排放基线 (tCO₂)
+        emission_total: 企业年度直接运营排放基线 (tCO2e)
         fleet_summary: 各车型车辆数 {"重型柴油货车": 50, "中型柴油货车": 30, ...}
 
     Returns:
-        QuotaGapResult: 配额缺口结果
+        QuotaGapResult: 模拟碳预算差额结果
 
     Note:
-        配额基准值为原型验证用估算值，非官方数据。
-        待物流行业正式纳入碳市场后需替换为官方基准值。
+        基准值为原型验证用估算值，非官方数据，也不构成履约依据。
     """
     total_quota = 0.0
     quota_by_type = {}
@@ -81,11 +81,11 @@ def estimate_quota_gap(emission_total: float, fleet_summary: dict) -> QuotaGapRe
     gap = emission_total - total_quota
 
     if (emission_total <= 0 and total_quota <= 0) or abs(gap) < max(emission_total * 0.01, 1e-6):
-        status = "平衡"
+        status = "基本平衡"
     elif gap > 0:
-        status = "缺口"
+        status = "超出预算"
     else:
-        status = "盈余"
+        status = "低于预算"
 
     return QuotaGapResult(
         total_quota_t=round(total_quota, 2),

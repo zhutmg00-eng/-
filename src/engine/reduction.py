@@ -46,11 +46,11 @@ class ReductionAnalysis:
     """减排分析结果
 
     Attributes:
-        baseline_emission: 基线排放量 (tCO₂)
-        scenario_emission: 情景排放量 (tCO₂)
-        reduction_t: 减少排放量 (tCO₂)
+        baseline_emission: 基线直接运营排放量 (tCO2e)
+        scenario_emission: 情景直接运营排放量 (tCO2e)
+        reduction_t: 直接运营减排量 (tCO2e)
         reduction_pct: 减排百分比 (%)
-        cost_savings: 合规成本节省详情
+        cost_savings: 碳价对标情景成本变化
         recommendations: 具体建议列表
         name: 情景名称（可选）
     """
@@ -253,7 +253,7 @@ def analyze_reduction_scenario(
     reduction_t = round(baseline_emission - scenario_emission, 2)
     reduction_pct = round(reduction_t / baseline_emission * 100, 2) if baseline_emission > 0 else 0.0
 
-    # 估算配额缺口变化
+    # 估算模拟碳预算差额变化
     baseline_fleet_summary = {g.vehicle_type: g.count for g in baseline_fleet}
     scenario_fleet_summary = {}
     for g in scenario_fleet:
@@ -262,30 +262,33 @@ def analyze_reduction_scenario(
     baseline_gap = estimate_quota_gap(baseline_emission, baseline_fleet_summary)
     scenario_gap = estimate_quota_gap(scenario_emission, scenario_fleet_summary)
 
-    # 估算合规成本节省
+    # 估算碳价对标情景成本变化
     price_df = load_carbon_price_data()
     baseline_cost = estimate_compliance_cost(baseline_gap.gap_t, price_df)
     scenario_cost = estimate_compliance_cost(scenario_gap.gap_t, price_df)
 
     # 计算成本节省
     cost_savings = {}
-    if baseline_cost.get("预估合规成本_参考价", 0) > 0 and scenario_cost.get("预估合规成本_参考价", 0) >= 0:
-        baseline_cost_val = baseline_cost.get("预估合规成本_参考价", 0)
-        scenario_cost_val = scenario_cost.get("预估合规成本_参考价", 0)
+    if baseline_cost.get("情景成本_参考价", 0) > 0 and scenario_cost.get("情景成本_参考价", 0) >= 0:
+        baseline_cost_val = baseline_cost.get("情景成本_参考价", 0)
+        scenario_cost_val = scenario_cost.get("情景成本_参考价", 0)
         cost_savings = {
-            "基线合规成本_元": baseline_cost_val,
-            "情景合规成本_元": scenario_cost_val,
+            "基线情景成本_元": baseline_cost_val,
+            "情景成本_元": scenario_cost_val,
             "节省_元": round(baseline_cost_val - scenario_cost_val, 2),
-            "配额缺口变化_t": round(baseline_gap.gap_t - scenario_gap.gap_t, 2),
+            "预算差额变化_t": round(baseline_gap.gap_t - scenario_gap.gap_t, 2),
         }
-    elif scenario_cost.get("合规需求") == "配额盈余" and baseline_cost.get("合规需求") == "需购买配额":
-        # 从缺口变为盈余
+    elif (
+        scenario_cost.get("情景判断") in {"低于模拟碳预算", "基本平衡"}
+        and baseline_cost.get("情景判断") == "超出模拟碳预算"
+    ):
+        # 从超出预算变为不超出预算
         cost_savings = {
-            "基线合规成本_元": baseline_cost.get("预估合规成本_参考价", 0),
-            "情景合规成本_元": 0,
-            "节省_元": round(baseline_cost.get("预估合规成本_参考价", 0), 2),
-            "备注": "情景方案使配额从缺口变为盈余",
-            "盈余量_t": scenario_cost.get("盈余量_t", 0),
+            "基线情景成本_元": baseline_cost.get("情景成本_参考价", 0),
+            "情景成本_元": 0,
+            "节省_元": round(baseline_cost.get("情景成本_参考价", 0), 2),
+            "备注": "情景方案使直接运营排放不再超出模拟碳预算",
+            "预算结余_t": scenario_cost.get("预算结余_t", 0),
         }
 
     # 生成建议
@@ -329,7 +332,7 @@ def compare_scenarios(
     if results:
         best = results[0]
         global_recommendations.append(
-            f"最优情景：「{best.name}」，减排{best.reduction_pct}%（{best.reduction_t} tCO₂）"
+            f"最优情景：「{best.name}」，直接运营减排{best.reduction_pct}%（{best.reduction_t} tCO2e）"
         )
 
     # 汇总各情景的减排潜力
@@ -337,10 +340,10 @@ def compare_scenarios(
     max_reduction = max(reduction_potentials) if reduction_potentials else 0
     if max_reduction > 0:
         global_recommendations.append(
-            f"所有情景最大可减排{max_reduction} tCO₂"
+            f"所有情景最大可减少直接运营排放{max_reduction} tCO2e"
         )
 
-    # 检查是否有情景能完全覆盖配额缺口
+    # 检查是否有情景能消除模拟碳预算超出量
     baseline = calculate_emission(baseline_fleet)
     baseline_summary = {g.vehicle_type: g.count for g in baseline_fleet}
     baseline_gap = estimate_quota_gap(baseline.total_emission_t, baseline_summary)
@@ -348,7 +351,7 @@ def compare_scenarios(
     for r in results:
         if r.reduction_t >= baseline_gap.gap_t and baseline_gap.gap_t > 0:
             global_recommendations.append(
-                f"「{r.name}」情景可完全覆盖配额缺口（缺口{baseline_gap.gap_t} tCO₂）"
+                f"「{r.name}」情景可消除模拟碳预算超出量（{baseline_gap.gap_t} tCO2e）"
             )
 
     return ScenarioComparison(
@@ -448,7 +451,7 @@ def find_optimal_reduction(
     # 计算所有情景并筛选
     comparison = compare_scenarios(baseline_fleet, scenarios)
 
-    # 按性价比（元/tCO₂减排）排序
+    # 按碳价对标节省额/直接减排量排序
     scored = []
     for r in comparison.scenarios:
         savings = r.cost_savings.get("节省_元", 0)
@@ -461,16 +464,11 @@ def find_optimal_reduction(
     # 如果有预算，选择性价比最高且在预算内的方案
     if budget is not None and scored:
         best = scored[0][0]
-        baseline_cost_val = best.cost_savings.get("基线合规成本_元", 0)
-        # 简化：假设减排投资约为合规成本节省的30-50%
-        estimated_investment = baseline_cost_val * 0.4 if baseline_cost_val > 0 else 0
-        if estimated_investment <= budget or estimated_investment == 0:
-            # 最优方案在预算内
-            comparison.scenarios = sorted([best], key=lambda x: x.reduction_pct, reverse=True)
-            comparison.scenarios[0].name = f"最优方案（{best.name}）"
-        else:
-            comparison.scenarios = sorted([best], key=lambda x: x.reduction_pct, reverse=True)
-            comparison.scenarios[0].name = f"推荐方案（{best.name}，预算{budget}元）"
+        comparison.scenarios = sorted([best], key=lambda x: x.reduction_pct, reverse=True)
+        comparison.scenarios[0].name = f"候选方案（{best.name}）"
+        comparison.recommendations.append(
+            f"当前缺少车辆购置和运营成本数据，未使用 {budget} 元预算做可行性筛选。"
+        )
     else:
         # 无预算限制，选择减排量最大的
         if scored:
@@ -497,7 +495,7 @@ def _generate_recommendations(
     Args:
         baseline_fleet: 基线车队
         changes: 减排措施
-        reduction_t: 减排量 (tCO₂)
+        reduction_t: 直接运营减排量 (tCO2e)
         reduction_pct: 减排百分比
 
     Returns:
@@ -508,7 +506,7 @@ def _generate_recommendations(
     # 基础建议
     if reduction_t > 0:
         recommendations.append(
-            f"✅ 该方案可减少 {reduction_t} tCO₂ 排放，减排比例 {reduction_pct}%"
+            f"该方案可减少 {reduction_t} tCO2e 直接运营排放，减排比例 {reduction_pct}%"
         )
 
     # 按车型给出针对性建议
@@ -520,41 +518,41 @@ def _generate_recommendations(
     if any("新能源" in k for k in changes):
         ne_count = sum(count for k, count in changes.items() if "新能源" in k)
         recommendations.append(
-            f"💡 替换 {ne_count} 辆燃油车为新能源车，可显著降低直接排放"
+            f"替换 {ne_count} 辆燃油车为新能源车，可显著降低直接运营排放"
         )
         recommendations.append(
-            "💡 建议关注新能源车全生命周期碳排放（电池生产、电力来源）"
+            "新能源情景未计购电间接排放，需结合当地电网因子补充核算"
         )
 
     # 如果有LNG替换措施
     if any("LNG" in k for k in changes):
         recommendations.append(
-            "💡 LNG相比柴油可减少约15-18%的碳排放，适合作为过渡方案"
+            "LNG 情景按当前直接排放因子估算，实际效果需用企业燃料台账复核"
         )
         recommendations.append(
-            "⚠️ LNG存在甲烷逃逸排放问题，需关注燃料链排放"
+            "LNG 存在甲烷逃逸问题，完整评价需纳入燃料链排放"
         )
 
     # 如果有满载率提升措施
     if any("满载率" in k for k in changes):
         recommendations.append(
-            "💡 提升满载率是低成本减排方式，建议优化路线规划和装载调度"
+            "提升满载率可降低模型中的单位排放，建议用调度数据验证实际效果"
         )
         recommendations.append(
-            "💡 可考虑引入智能调度系统提升整体运营效率"
+            "可结合路线和装载记录评估智能调度的实际收益"
         )
 
     # 通用建议
     if reduction_pct < 10:
         recommendations.append(
-            "⚠️ 当前减排力度较小（<10%），建议叠加多种减排措施"
+            "当前直接运营减排幅度小于 10%，可继续比较组合情景"
         )
     elif reduction_pct >= 50:
         recommendations.append(
-            "✅ 该方案减排力度较大（≥50%），可显著改善碳资产状况"
+            "该情景直接运营减排幅度达到 50% 以上，应进一步核查购电间接排放"
         )
 
-    # 配额缺口相关建议
+    # 模拟碳预算差额相关建议
     baseline = calculate_emission(baseline_fleet)
     baseline_summary = {g.vehicle_type: g.count for g in baseline_fleet}
     baseline_gap = estimate_quota_gap(baseline.total_emission_t, baseline_summary)
@@ -563,11 +561,11 @@ def _generate_recommendations(
         remaining_gap = baseline_gap.gap_t - reduction_t
         if remaining_gap > 0:
             recommendations.append(
-                f"⚠️ 实施该方案后仍存在 {remaining_gap:.0f} tCO₂ 配额缺口，建议继续优化"
+                f"实施该情景后仍高于模拟碳预算 {remaining_gap:.0f} tCO2e，可继续优化"
             )
         else:
             recommendations.append(
-                "✅ 实施该方案后可完全覆盖配额缺口，无需额外购买配额"
+                "实施该情景后直接运营排放不再高于模拟碳预算"
             )
 
     return recommendations

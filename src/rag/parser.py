@@ -1,11 +1,14 @@
 """政策文档解析器
 
-支持格式：PDF, DOCX, HTML
+支持格式：PDF, DOCX, HTML, Markdown, TXT
 功能：解析 → 清洗 → 切分chunk
 """
 from typing import List, Dict
 from pathlib import Path
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:  # 兼容旧版 PyMuPDF
+    import fitz
 try:
     from docx import Document
     DOCX_AVAILABLE = True
@@ -13,6 +16,32 @@ except ImportError:
     DOCX_AVAILABLE = False
 from bs4 import BeautifulSoup
 import re
+
+
+_NOISE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"ICP备",
+        r"公网安备",
+        r"网站标识码",
+        r"版权所有",
+        r"主办单位",
+        r"运行维护单位",
+        r"联系我们",
+        r"中文域名",
+        r"政务微(?:信|博)",
+        r"扫一扫.*(?:手机|当前页|页面)",
+        r"返回顶部",
+        r"关闭窗口",
+        r"网站地图",
+        r"无障碍浏览",
+        r"^(?:URL|网址)\s*:",
+    )
+]
+
+_NAVIGATION_LINE = re.compile(
+    r"^(?:首页|新闻|政策|公开|服务|互动|专题|手机版|微博|微信|中国政府网)$"
+)
 
 
 def parse_pdf(file_path: Path) -> str:
@@ -28,7 +57,7 @@ def parse_pdf(file_path: Path) -> str:
 def parse_docx(file_path: Path) -> str:
     """解析Word文档为纯文本"""
     if not DOCX_AVAILABLE:
-        print(f"⚠️ python-docx未安装，无法解析: {file_path.name}")
+        print(f"[WARN] python-docx未安装，无法解析: {file_path.name}")
         return ""
     doc = Document(file_path)
     return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
@@ -52,34 +81,55 @@ def parse_document(file_path: Path) -> str:
         return parse_docx(file_path)
     elif ext in (".html", ".htm"):
         return parse_html(file_path)
-    elif ext == ".txt":
+    elif ext in (".md", ".markdown", ".txt"):
         return file_path.read_text(encoding="utf-8")
     else:
-        print(f"⚠️ 不支持的文件格式: {ext} ({file_path.name})")
+        print(f"[WARN] 不支持的文件格式: {ext} ({file_path.name})")
         return ""
 
 
 def clean_policy_text(raw_text: str) -> str:
     """
     清洗政策文档文本
-    - 移除多余空行
-    - 合并断行（政策文档常有页码导致的断行）
-    - 保留章节标题结构
+    - 移除网页导航、备案号、版权页脚等抓取噪声
+    - 去除 Markdown 标记并保留可读的标题和链接文字
+    - 删除抓取页面中重复出现的长行
     """
-    lines = raw_text.split("\n")
+    normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace("\u200b", "").replace("\ufeff", "")
+    lines = normalized.split("\n")
     cleaned = []
-    for line in lines:
-        line = line.strip()
+    seen_long_lines = set()
+    for raw_line in lines:
+        line = raw_line.strip()
         if not line:
             continue
-        # 简单合并：如果上一行不是标题（以数字+句号或"第"开头）
-        if cleaned and not (
-            line.startswith(("第", "一、", "二、", "三、", "1.", "2.", "3."))
-            or len(line) < 30  # 短行可能是标题
+
+        if _NAVIGATION_LINE.fullmatch(line) or any(pattern.search(line) for pattern in _NOISE_PATTERNS):
+            continue
+        if re.fullmatch(r"[-=_*#\s]{3,}", line):
+            continue
+
+        # Markdown 图片没有检索价值；普通链接保留可读文字。
+        line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", line)
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        line = re.sub(r"^>\s*", "", line)
+        line = re.sub(r"^[-*+]\s+", "", line)
+        line = line.replace("**", "").replace("__", "").replace("`", "").strip()
+        if (
+            not line
+            or re.fullmatch(r"https?://\S+", line)
+            or any(pattern.search(line) for pattern in _NOISE_PATTERNS)
         ):
-            cleaned[-1] += line
-        else:
-            cleaned.append(line)
+            continue
+
+        # 抓取结果经常把同一正文重复两遍；长行精确去重不会破坏章节标题。
+        if len(line) >= 24:
+            if line in seen_long_lines:
+                continue
+            seen_long_lines.add(line)
+        cleaned.append(line)
     return "\n".join(cleaned)
 
 
@@ -193,5 +243,5 @@ def process_document(file_path: Path, doc_date: str = "") -> List[Dict]:
         doc_source=file_path.name,
         doc_date=doc_date,
     )
-    print(f"📄 {file_path.name}: {len(chunks)} 个chunk")
+    print(f"[DOC] {file_path.name}: {len(chunks)} 个chunk")
     return chunks

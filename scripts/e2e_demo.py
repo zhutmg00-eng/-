@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""端到端测试 — 模拟物流企业使用完整流程
+"""端到端测试：模拟物流企业使用直接排放与减排情景流程。
 
-场景：一家拥有100辆车的物流企业，使用本工具计算碳排放和合规成本
+场景：一家拥有100辆车的物流企业，计算直接运营排放和模拟碳预算情景。
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from src.engine.calculator import VehicleGroupData, calculate_emission
 from src.engine.quota import estimate_quota_gap
@@ -14,7 +16,7 @@ from src.engine.emission_factors import get_factor_comparison
 
 def run_e2e_demo():
     print("=" * 60)
-    print("🌿 碳资产管理助手 — 端到端演示")
+    print("🌿 物流碳排放与减排情景助手 — 端到端演示")
     print("=" * 60)
     
     # === 1. 企业车队数据 ===
@@ -36,50 +38,51 @@ def run_e2e_demo():
     print("=" * 60)
     
     baseline = calculate_emission(fleet)
-    print(f"\n年度碳排放总量: {baseline.total_emission_t:,.1f} tCO₂")
+    print(f"\n年度直接运营排放: {baseline.total_emission_t:,.1f} tCO2e")
     print(f"总车辆数: {baseline.total_vehicles} 辆")
     print(f"\n分车型排放明细:")
-    print(f"{'车型':<16} {'排放量(tCO₂)':>12} {'占比':>8} {'单辆排放':>10}")
+    print(f"{'车型':<16} {'排放量(tCO2e)':>14} {'占比':>8} {'单辆排放':>10}")
     for vtype, data in baseline.emission_by_type.items():
         print(f"  {vtype:<14} {data['排放量_tCO2']:>10.1f} {data['占比']:>7.1f}% {data['单辆排放_tCO2']:>8.1f}")
     
-    # === 3. 配额缺口估算 ===
+    # === 3. 模拟碳预算差额估算 ===
     print("\n" + "=" * 60)
-    print("📋 第二步：碳配额缺口估算")
+    print("📋 第二步：模拟碳预算差额估算")
     print("=" * 60)
     
     fleet_summary = {g.vehicle_type: g.count for g in fleet}
     gap = estimate_quota_gap(baseline.total_emission_t, fleet_summary)
     
-    print(f"\n免费配额总量: {gap.total_quota_t:,.1f} tCO₂")
-    print(f"实际排放量:   {gap.total_emission_t:,.1f} tCO₂")
-    print(f"配额缺口:     {gap.gap_t:,.1f} tCO₂")
+    print(f"\n模拟碳预算:   {gap.total_quota_t:,.1f} tCO2e")
+    print(f"直接运营排放: {gap.total_emission_t:,.1f} tCO2e")
+    print(f"预算差额:     {gap.gap_t:,.1f} tCO2e")
     print(f"状态:         {gap.gap_status}")
     
-    print(f"\n分车型配额明细:")
-    print(f"{'车型':<16} {'车辆数':>6} {'基准值':>8} {'配额(t)':>10}")
+    print(f"\n分车型模拟预算明细:")
+    print(f"{'车型':<16} {'车辆数':>6} {'基准值':>8} {'预算(t)':>10}")
     for vtype, data in gap.quota_by_type.items():
         print(f"  {vtype:<14} {data['车辆数']:>4} {data['基准值_t_per_辆']:>6.0f} {data['配额_t']:>8.1f}")
     
-    # === 4. 碳价成本估算 ===
+    # === 4. 碳价对标情景估算 ===
     print("\n" + "=" * 60)
-    print("💰 第三步：碳合规成本估算")
+    print("💰 第三步：碳价对标情景估算")
     print("=" * 60)
     
     price_df = load_carbon_price_data()
     cost = estimate_compliance_cost(gap.gap_t, price_df)
     
-    print(f"\n合规需求: {cost['合规需求']}")
-    if "配额缺口_t" in cost:
-        print(f"配额缺口: {cost['配额缺口_t']:,.1f} tCO₂")
+    print(f"\n情景判断: {cost['情景判断']}")
+    if "预算差额_t" in cost:
+        print(f"预算差额: {cost['预算差额_t']:,.1f} tCO2e")
         print(f"当前碳价: {cost['当前碳价_元每吨']} 元/吨")
         print(f"近90日均价: {cost.get('近90日均价_元每吨', 'N/A')} 元/吨")
         print(f"碳价波动率: {cost.get('碳价波动率', 'N/A')}")
-        print(f"\n预估合规成本: {cost['预估合规成本_参考价']:,.0f} 元")
-        print(f"成本区间: {cost['预估合规成本区间_low']:,.0f} ~ {cost['预估合规成本区间_high']:,.0f} 元")
-    elif "盈余量_t" in cost:
-        print(f"盈余量: {cost['盈余量_t']:,.1f} tCO₂")
-        print(f"预估收益: {cost['预估收益_low']:,.0f} ~ {cost['预估收益_high']:,.0f} 元")
+        print(f"\n情景成本: {cost['情景成本_参考价']:,.0f} 元")
+        print(f"成本区间: {cost['情景成本区间_low']:,.0f} ~ {cost['情景成本区间_high']:,.0f} 元")
+    elif "预算结余_t" in cost:
+        print(f"预算结余: {cost['预算结余_t']:,.1f} tCO2e")
+        print(f"潜在价值: {cost['潜在价值_low']:,.0f} ~ {cost['潜在价值_high']:,.0f} 元")
+    print(f"口径说明: {cost['备注']}")
     
     # === 5. 排放因子对比 ===
     print("\n" + "=" * 60)
@@ -95,21 +98,21 @@ def run_e2e_demo():
     
     # === 6. 总结 ===
     print("\n" + "=" * 60)
-    print("📝 企业碳资产总结")
+    print("📝 企业排放与减排情景总结")
     print("=" * 60)
     print(f"""
 企业: 示例物流运输有限公司
 车队: {baseline.total_vehicles} 辆（含{fleet[3].count}辆新能源车）
-年度碳排放: {baseline.total_emission_t:,.1f} tCO₂
-免费配额:   {gap.total_quota_t:,.1f} tCO₂
-配额缺口:   {gap.gap_t:,.1f} tCO₂（{gap.gap_status}）
-预估成本:   {cost.get('预估合规成本_参考价', cost.get('预估收益_low', 0)):,.0f} 元
+直接运营排放: {baseline.total_emission_t:,.1f} tCO2e
+模拟碳预算:   {gap.total_quota_t:,.1f} tCO2e
+预算差额:     {gap.gap_t:,.1f} tCO2e（{gap.gap_status}）
+情景金额:     {cost.get('情景成本_参考价', cost.get('潜在价值_low', 0)):,.0f} 元
 
 建议:
-1. {'需购买配额' if gap.gap_t > 0 else '配额盈余可出售'} 
-2. 新能源车已减少排放约{fleet[3].count * 40000 * 0.877 / 1000:.0f} tCO₂/年
+1. {'直接运营排放高于模拟预算，应优先评估减排措施' if gap.gap_t > 0 else '直接运营排放低于模拟预算，但差额不等同于可出售配额'}
+2. 新能源车替代可减少直接运营排放约{fleet[3].count * 40000 * 0.877 / 1000:.0f} tCO2e/年（未计购电间接排放）
 3. 提高满载率可降低单位排放（满载率从70%→75%约减少2%排放）
-4. 建议关注全国碳市场碳价走势，择时购买配额
+4. 碳价仅用于情景对标，不代表物流企业当前履约成本
 """)
     
     print("✅ 端到端测试完成")

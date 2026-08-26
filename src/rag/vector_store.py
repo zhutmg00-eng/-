@@ -6,10 +6,9 @@
 """
 from typing import List, Dict, Optional
 from pathlib import Path
+import hashlib
 import re
-import math
-from collections import Counter
-from src.config import CHROMA_DB_DIR, EMBEDDING_MODEL
+from src.config import CHROMA_DB_DIR, EMBEDDING_MODEL, OPENAI_API_KEY
 
 # 尝试导入chromadb
 try:
@@ -17,6 +16,47 @@ try:
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
+
+
+def _char_ngrams(text: str, n: int = 2) -> set[str]:
+    compact = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", text.lower())
+    if len(compact) < n:
+        return {compact} if compact else set()
+    return {compact[i:i + n] for i in range(len(compact) - n + 1)}
+
+
+def _lexical_relevance(query: str, text: str, source: str = "") -> float:
+    """计算适合中文政策标题和正文的轻量关键词覆盖率。"""
+    query_grams = _char_ngrams(query, 2) | _char_ngrams(query, 3)
+    if not query_grams:
+        return 0.0
+
+    text_grams = _char_ngrams(text, 2) | _char_ngrams(text, 3)
+    source_grams = _char_ngrams(source, 2) | _char_ngrams(source, 3)
+    content_coverage = len(query_grams & text_grams) / len(query_grams)
+    source_coverage = len(query_grams & source_grams) / len(query_grams)
+
+    domain_terms = [
+        "物流", "运输", "公路", "水路", "碳排放", "核算", "报告",
+        "碳达峰", "目标", "配额", "履约", "碳交易", "自愿减排", "ccer",
+        "货车", "车辆", "车队", "燃油", "新能源", "减排", "满载率",
+    ]
+    matched_terms = [term for term in domain_terms if term in query.lower()]
+    combined = f"{source}\n{text}".lower()
+    term_coverage = (
+        sum(term in combined for term in matched_terms) / len(matched_terms)
+        if matched_terms else 0.0
+    )
+    score = 0.45 * content_coverage + 0.35 * source_coverage + 0.20 * term_coverage
+
+    vehicle_query = any(term in query for term in ("物流", "运输", "货车", "车辆", "车队", "燃油"))
+    transport_source = any(term in source for term in ("交通", "运输", "公路", "水路", "车辆"))
+    trading_source = any(term in source for term in ("碳排放权交易", "全国碳市场", "配额分配"))
+    if vehicle_query and transport_source:
+        score += 0.15
+    if vehicle_query and trading_source and not any(term in query for term in ("碳交易", "配额", "履约")):
+        score *= 0.55
+    return min(1.0, score)
 
 
 class PolicyVectorStore:
@@ -27,37 +67,84 @@ class PolicyVectorStore:
 
     def __init__(self, persist_dir: str = None):
         self.persist_dir = persist_dir or str(CHROMA_DB_DIR)
-        self.collection_name = "carbon_policy"
+        self.embedding_model = EMBEDDING_MODEL.strip() or "chromadb-default"
+        model_id = hashlib.sha1(self.embedding_model.encode("utf-8")).hexdigest()[:8]
+        self.collection_name = f"carbon_policy_v4_{model_id}"
+        self.fallback_cache_file = (
+            Path(self.persist_dir) / f"{self.collection_name}_fallback_docs.json"
+        )
         self._fallback_docs: List[Dict] = []  # 关键词模式的文档存储
 
         if CHROMA_AVAILABLE:
+            self.embedding_function = self._build_embedding_function()
             self._init_chroma()
         else:
             self._init_fallback()
+
+    def _build_embedding_function(self):
+        """根据 EMBEDDING_MODEL 创建 Chroma 实际使用的嵌入函数。"""
+        from chromadb.utils import embedding_functions
+
+        setting = self.embedding_model.lower()
+        if setting in {"default", "chromadb-default"}:
+            return embedding_functions.DefaultEmbeddingFunction()
+
+        if setting == "openai" or setting.startswith("openai:"):
+            if not OPENAI_API_KEY:
+                raise RuntimeError("EMBEDDING_MODEL 使用 OpenAI 时必须设置 OPENAI_API_KEY")
+            model_name = self.embedding_model.split(":", 1)[1] if ":" in self.embedding_model else "text-embedding-3-small"
+            return embedding_functions.OpenAIEmbeddingFunction(
+                api_key=OPENAI_API_KEY,
+                model_name=model_name,
+            )
+
+        if setting == "bge-local" or setting.startswith("sentence-transformers:"):
+            model_name = (
+                self.embedding_model.split(":", 1)[1]
+                if ":" in self.embedding_model
+                else "BAAI/bge-small-zh-v1.5"
+            )
+            return embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=model_name,
+                normalize_embeddings=True,
+            )
+
+        raise ValueError(
+            "不支持的 EMBEDDING_MODEL；可用 chromadb-default、openai:<model> 或 sentence-transformers:<model>"
+        )
 
     def _init_chroma(self):
         """初始化ChromaDB"""
         self.client = chromadb.PersistentClient(path=self.persist_dir)
         try:
-            self.collection = self.client.get_collection(self.collection_name)
-            print(f"✅ 已加载ChromaDB知识库: {self.collection.count()} 个文档块")
+            self.collection = self.client.get_collection(
+                self.collection_name,
+                embedding_function=self.embedding_function,
+            )
         except Exception:
             self.collection = self.client.create_collection(
                 name=self.collection_name,
-                metadata={"description": "中国碳交易政策法规知识库"},
+                embedding_function=self.embedding_function,
+                metadata={
+                    "description": "中国碳交易与交通低碳政策知识库",
+                    "embedding_model": self.embedding_model,
+                },
             )
-            print("✅ 已创建新ChromaDB知识库")
+            print("[OK] 已创建新ChromaDB知识库")
+        else:
+            print(f"[OK] 已加载ChromaDB知识库: {self.collection.count()} 个文档块")
 
     def _init_fallback(self):
         """初始化关键词检索模式"""
         # 尝试从JSON加载之前入库的文档
         import json
-        cache_file = Path(self.persist_dir) / "fallback_docs.json"
-        if cache_file.exists():
-            self._fallback_docs = json.loads(cache_file.read_text(encoding="utf-8"))
-            print(f"✅ 已加载关键词检索知识库: {len(self._fallback_docs)} 个文档块")
+        if self.fallback_cache_file.exists():
+            self._fallback_docs = json.loads(
+                self.fallback_cache_file.read_text(encoding="utf-8")
+            )
+            print(f"[OK] 已加载关键词检索知识库: {len(self._fallback_docs)} 个文档块")
         else:
-            print("✅ 已创建新关键词检索知识库（ChromaDB未安装）")
+            print("[OK] 已创建新关键词检索知识库（ChromaDB未安装）")
 
     def add_documents(self, chunks: List[Dict], doc_source: str, doc_date: str = ""):
         """向知识库添加文档chunk"""
@@ -78,7 +165,7 @@ class PolicyVectorStore:
         for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_source}_{i}"
             ids.append(chunk_id)
-            documents.append(chunk["text"])
+            documents.append(f"来源文档：{doc_source}\n{chunk['text']}")
             metadatas.append({
                 "source": doc_source,
                 "date": doc_date,
@@ -86,12 +173,16 @@ class PolicyVectorStore:
                 **chunk.get("metadata", {}),
             })
 
-        self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
-        print(f"✅ 已入库 {len(chunks)} 个文档块 来自: {doc_source}")
+        self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        print(f"[OK] 已入库 {len(chunks)} 个文档块 来自: {doc_source}")
 
     def _add_fallback(self, chunks: List[Dict], doc_source: str, doc_date: str = ""):
         """关键词模式入库"""
         import json
+        self._fallback_docs = [
+            doc for doc in self._fallback_docs
+            if doc.get("metadata", {}).get("source") != doc_source
+        ]
         for i, chunk in enumerate(chunks):
             self._fallback_docs.append({
                 "id": f"{doc_source}_{i}",
@@ -105,13 +196,12 @@ class PolicyVectorStore:
             })
 
         # 持久化到JSON
-        cache_file = Path(self.persist_dir) / "fallback_docs.json"
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(
+        self.fallback_cache_file.parent.mkdir(parents=True, exist_ok=True)
+        self.fallback_cache_file.write_text(
             json.dumps(self._fallback_docs, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        print(f"✅ 已入库 {len(chunks)} 个文档块 来自: {doc_source}")
+        print(f"[OK] 已入库 {len(chunks)} 个文档块 来自: {doc_source}")
 
     def search(self, query: str, k: int = 5) -> List[Dict]:
         """语义检索最相关的政策条款"""
@@ -121,18 +211,32 @@ class PolicyVectorStore:
             return self._search_tfidf(query, k)
 
     def _search_chroma(self, query: str, k: int = 5) -> List[Dict]:
-        """ChromaDB语义检索"""
-        results = self.collection.query(query_texts=[query], n_results=k)
+        """ChromaDB 语义召回后，用标题和中文关键词覆盖率混合重排。"""
+        total = self.collection.count()
+        if total == 0:
+            return []
+        candidate_count = min(total, max(k * 20, 100))
+        results = self.collection.query(query_texts=[query], n_results=candidate_count)
 
         formatted = []
         if results["documents"] and results["documents"][0]:
             for i in range(len(results["documents"][0])):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                distance = results["distances"][0][i] if results["distances"] else 1.0
+                semantic_score = 1.0 / (1.0 + max(float(distance), 0.0))
+                lexical_score = _lexical_relevance(
+                    query,
+                    results["documents"][0][i],
+                    metadata.get("source", ""),
+                )
+                combined_score = 0.35 * semantic_score + 0.65 * lexical_score
                 formatted.append({
                     "text": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                    "distance": results["distances"][0][i] if results["distances"] else None,
+                    "metadata": metadata,
+                    "distance": 1.0 - combined_score,
                 })
-        return formatted
+        formatted.sort(key=lambda item: item["distance"])
+        return formatted[:k]
 
     def _search_tfidf(self, query: str, k: int = 5) -> List[Dict]:
         """TF-IDF关键词检索（fallback模式）
@@ -172,7 +276,13 @@ class PolicyVectorStore:
                 if kw in query and kw in doc["text"]:
                     score += 0.1
 
-            scored.append((score, doc))
+            lexical_score = _lexical_relevance(
+                query,
+                doc["text"],
+                doc.get("metadata", {}).get("source", ""),
+            )
+            combined_score = 0.35 * min(score, 1.0) + 0.65 * lexical_score
+            scored.append((combined_score, doc))
 
         # 排序取Top-K
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -192,12 +302,14 @@ class PolicyVectorStore:
                 "total_chunks": self.collection.count(),
                 "collection_name": self.collection_name,
                 "mode": "chromadb",
+                "embedding_model": self.embedding_model,
             }
         else:
             return {
                 "total_chunks": len(self._fallback_docs),
                 "collection_name": self.collection_name,
                 "mode": "tfidf_fallback",
+                "embedding_model": "keyword-ngram",
             }
 
     def clear(self):
@@ -206,11 +318,14 @@ class PolicyVectorStore:
             self.client.delete_collection(self.collection_name)
             self.collection = self.client.create_collection(
                 name=self.collection_name,
-                metadata={"description": "中国碳交易政策法规知识库"},
+                embedding_function=self.embedding_function,
+                metadata={
+                    "description": "中国碳交易与交通低碳政策知识库",
+                    "embedding_model": self.embedding_model,
+                },
             )
         else:
             self._fallback_docs = []
-            cache_file = Path(self.persist_dir) / "fallback_docs.json"
-            if cache_file.exists():
-                cache_file.unlink()
-        print("✅ 知识库已清空")
+            if self.fallback_cache_file.exists():
+                self.fallback_cache_file.unlink()
+        print("[OK] 知识库已清空")

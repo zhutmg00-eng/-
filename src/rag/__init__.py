@@ -1,6 +1,6 @@
 """RAG政策解析助手 - 完整调用链路"""
 from src.rag.vector_store import PolicyVectorStore
-from src.rag.generator import SYSTEM_PROMPT, build_user_prompt, call_llm
+from src.rag.generator import SYSTEM_PROMPT, build_retrieval_answer, build_user_prompt, call_llm
 from src.config import RETRIEVAL_TOP_K
 
 
@@ -36,7 +36,8 @@ class PolicyAdvisor:
         user_prompt = build_user_prompt(question, retrieved, carbon_profile)
 
         # 3. 调用LLM
-        answer = call_llm(SYSTEM_PROMPT, user_prompt)
+        fallback_answer = build_retrieval_answer(question, retrieved)
+        answer = call_llm(SYSTEM_PROMPT, user_prompt, fallback_answer=fallback_answer)
 
         return {
             "question": question,
@@ -44,7 +45,10 @@ class PolicyAdvisor:
                 {
                     "source": r["metadata"].get("source", "未知"),
                     "date": r["metadata"].get("date", ""),
-                    "relevance": round(1 - r.get("distance", 0), 3) if r.get("distance") else None,
+                    "relevance": (
+                        round(1 - r["distance"], 3)
+                        if r.get("distance") is not None else None
+                    ),
                 }
                 for r in retrieved
             ],
@@ -67,5 +71,6 @@ __all__ = [
     "PolicyVectorStore",
     "SYSTEM_PROMPT",
     "build_user_prompt",
+    "build_retrieval_answer",
     "call_llm",
 ]

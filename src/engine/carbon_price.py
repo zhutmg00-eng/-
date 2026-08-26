@@ -1,4 +1,4 @@
-"""碳价参考预测与合规成本估算
+"""碳价参考与模拟碳预算情景成本估算。
 
 成本计算公式：
     Cost = max(Gap, 0) × P_current
@@ -59,10 +59,13 @@ def calculate_price_stats(df) -> dict:
 
 def estimate_compliance_cost(gap_t: float, price_df=None) -> dict:
     """
-    基于历史碳价估算碳合规成本
+    基于历史碳价估算模拟预算差额的情景成本或潜在价值。
+
+    函数名为兼容现有调用保留；结果不代表物流企业的法定履约成本、
+    可交易配额或确定收益。
 
     Args:
-        gap_t: 配额缺口 (tCO₂)，正数为缺口
+        gap_t: 模拟碳预算差额 (tCO2e)，正数为超出预算
         price_df: 碳价历史数据DataFrame。如果None，使用模拟数据。
 
     Returns:
@@ -85,22 +88,24 @@ def estimate_compliance_cost(gap_t: float, price_df=None) -> dict:
         volatility = round(recent.pct_change().std() * 100, 2)
 
     if gap_t <= 0:
+        judgement = "基本平衡" if abs(gap_t) < 1e-9 else "低于模拟碳预算"
         return {
-            "合规需求": "配额盈余",
-            "盈余量_t": round(abs(gap_t), 2),
-            "预估收益_low": round(abs(gap_t) * min_price, 2),
-            "预估收益_high": round(abs(gap_t) * max_price, 2),
+            "情景判断": judgement,
+            "预算结余_t": round(abs(gap_t), 2),
+            "潜在价值_low": round(abs(gap_t) * min_price, 2),
+            "潜在价值_high": round(abs(gap_t) * max_price, 2),
             "参考碳价_元每吨": current_price,
-            "备注": "盈余配额可在碳市场出售",
+            "备注": "仅按全国碳市场价格估算潜在价值，不代表可交易配额或实际收益",
         }
 
     return {
-        "合规需求": "需购买配额",
-        "配额缺口_t": round(gap_t, 2),
+        "情景判断": "超出模拟碳预算",
+        "预算差额_t": round(gap_t, 2),
         "当前碳价_元每吨": current_price,
         "近90日均价_元每吨": avg_price,
         "碳价波动率": f"{volatility}%",
-        "预估合规成本_参考价": round(gap_t * current_price, 2),
-        "预估合规成本区间_low": round(gap_t * min_price, 2),
-        "预估合规成本区间_high": round(gap_t * max_price, 2),
+        "情景成本_参考价": round(gap_t * current_price, 2),
+        "情景成本区间_low": round(gap_t * min_price, 2),
+        "情景成本区间_high": round(gap_t * max_price, 2),
+        "备注": "科研情景估算，不代表物流企业当前存在碳市场履约义务",
     }

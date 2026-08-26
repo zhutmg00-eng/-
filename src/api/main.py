@@ -10,13 +10,15 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 from pathlib import Path
 
+from src.models.fleet import FleetInput, VehicleInput
+
 app = FastAPI(
-    title="碳资产管理与智能合规决策助手 API",
-    version="0.2.0",
-    description="面向物流企业的碳资产管理工具",
+    title="物流碳排放与减排情景决策助手 API",
+    version="0.3.0",
+    description="面向物流企业的科研原型，核算直接运营排放并模拟减排情景",
 )
 
 
@@ -72,23 +74,14 @@ app.include_router(compare_router)
 
 # ========== 数据模型 ==========
 
-class VehicleInput(BaseModel):
-    vehicle_type: str
-    count: int
-    annual_km: float
-    load_factor: float = 0.75
-
-class FleetInput(BaseModel):
-    company_name: str
-    fleet: List[VehicleInput]
-
 class CarbonResult(BaseModel):
     company_name: str
     total_emission_t: float
     total_vehicles: int
     emission_by_type: dict
-    quota_gap: dict
-    compliance_cost: dict
+    carbon_budget: dict
+    scenario_cost: dict
+    methodology_note: str
 
 class PolicyQuestion(BaseModel):
     question: str
@@ -104,7 +97,7 @@ class PolicyAnswer(BaseModel):
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
 
 
 @app.get("/api/vehicle-types")
@@ -127,7 +120,7 @@ async def get_vehicle_types(api_key: str = Depends(verify_api_key)):
 
 @app.post("/api/calculate", response_model=CarbonResult)
 async def calculate_carbon(fleet_input: FleetInput, api_key: str = Depends(verify_api_key)):
-    """计算企业碳排放基线、配额缺口、合规成本"""
+    """计算直接运营排放基线、模拟碳预算差额和情景成本。"""
     from src.engine.calculator import VehicleGroupData, calculate_emission
     from src.engine.quota import estimate_quota_gap
     from src.engine.carbon_price import estimate_compliance_cost, load_carbon_price_data
@@ -146,7 +139,7 @@ async def calculate_carbon(fleet_input: FleetInput, api_key: str = Depends(verif
     # 2. 计算碳排放基线
     baseline = calculate_emission(fleet)
 
-    # 3. 构建车队摘要 → 估算配额缺口
+    # 3. 构建车队摘要 → 估算模拟碳预算差额
     fleet_summary = {}
     for v in fleet_input.fleet:
         fleet_summary[v.vehicle_type] = fleet_summary.get(v.vehicle_type, 0) + v.count
@@ -162,13 +155,17 @@ async def calculate_carbon(fleet_input: FleetInput, api_key: str = Depends(verif
         total_emission_t=baseline.total_emission_t,
         total_vehicles=baseline.total_vehicles,
         emission_by_type=baseline.emission_by_type,
-        quota_gap={
-            "配额总量_t": gap.total_quota_t,
-            "缺口_t": gap.gap_t,
+        carbon_budget={
+            "模拟碳预算_t": gap.total_quota_t,
+            "预算差额_t": gap.gap_t,
             "状态": gap.gap_status,
-            "分车型配额": gap.quota_by_type,
+            "分车型预算": gap.quota_by_type,
+            "口径说明": "科研原型估算，不是法定配额或履约依据",
         },
-        compliance_cost=cost,
+        scenario_cost=cost,
+        methodology_note=(
+            "当前仅核算车辆直接运营排放；新能源物流车的购电间接排放及车辆全生命周期排放未计入。"
+        ),
     )
 
 

@@ -53,5 +53,5 @@ EXPOSE 8000 8501
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 默认启动命令（通过docker-compose指定）
-CMD ["echo", "请通过 docker compose up 启动服务"]
+# 默认启动 API；Compose 会为 Web 服务覆盖此命令。
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

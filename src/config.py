@@ -31,7 +31,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
 # Embedding配置
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "openai")  # openai / bge-local
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "chromadb-default")
 
 # 根据模型选择API配置
 def get_llm_config(model: str = None) -> dict:
