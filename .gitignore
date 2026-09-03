@@ -8,6 +8,7 @@ venv/
 env/
 *.egg-info/
 dist/
+!packages/dsh-plugin-carbon-asset/dist/
 build/
 
 # 环境变量

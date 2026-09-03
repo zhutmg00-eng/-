@@ -100,11 +100,37 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 │   ├── engine/                 # 排放、预算、碳价和减排引擎
 │   ├── models/                 # Pydantic 输入模型
 │   ├── rag/                    # 解析、混合检索与生成
-│   └── ui/                     # Streamlit 与 PDF 报告
-├── tests/                      # 66 项自动化测试
+├── tests/                      # 82 项自动化测试
+├── packages/
+│   └── dsh-plugin-carbon-asset/ # DeepSeek Harness 官方生态插件
 ├── Dockerfile
 └── docker-compose.yml
 ```
+
+## 🔌 DeepSeek Harness (dsh) 插件支持
+
+本项目已基于官方 Cordis 微内核封装为符合 [DeepSeek Harness (`dsh`)](https://github.com/deepseek-ai/deepseek-harness) 规范的标准生态插件 **`dsh-plugin-carbon-asset`**（位于 `packages/dsh-plugin-carbon-asset/`）。
+
+### 注册的 Agent 工具列表
+- `carbon_calculate`：物流车队直接运营碳排放基线测算与模拟碳预算差额对标
+- `carbon_tco_evaluate`：新能源纯电货车替换 TCO 拥有成本、静态投资回收期（年）与减排边际成本（MAC）测算
+- `carbon_reduction_scenario`：综合减排情景模拟（新能源替换 + 满载率提升优化）
+- `carbon_policy_query`：中国碳市场法规与绿色交通双碳政策智能检索与溯源问答
+- `carbon_enterprise_compare`：多物流企业多车队横向碳对标矩阵
+
+### 载入与使用方式
+在 DeepSeek Harness 的 `cordis.yml` 中挂载：
+```yaml
+- name: './packages/dsh-plugin-carbon-asset'
+  config:
+    apiBaseUrl: 'http://127.0.0.1:8000'
+    preferHttp: true
+```
+或者在 dsh 环境下安装：
+```bash
+dsh plugin add ./packages/dsh-plugin-carbon-asset
+```
+> **双模自适应**：插件支持 HTTP 接口与本地 Python CLI (`scripts/cli_bridge.py`) 双通道通信。未启动 FastAPI 服务时，插件自动调用子进程计算引擎，即开即用。
 
 ## API
 
