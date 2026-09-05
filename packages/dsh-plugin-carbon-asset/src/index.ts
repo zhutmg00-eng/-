@@ -1,8 +1,10 @@
 /**
- * dsh-plugin-carbon-asset: DeepSeek Harness 官方规范插件
+ * dsh-plugin-carbon-asset: DeepSeek Harness 官方规范生态插件
  * 
- * 为 DeepSeek Agent 赋予物流车队活动水平碳核算、模拟碳预算对标、
- * 新能源替换 TCO 投资回收期与边际减排成本 (MAC) 测算、多情景减排模拟及政策智能检索工具。
+ * 严格对齐 DeepSeek Harness (@deepseek-ai/dsh-tools) 规范与 Post-mortem 0001 规范：
+ * 1. 采用命名空间导出 (name, inject, apply)，严禁使用 export default (避免 Loader 丢弃 inject 导致崩溃)；
+ * 2. 所有工具 parameters 经由 defineTool 编译为合规 JSON Schema 对象 (type: "object", properties, required)；
+ * 3. 严格声明 output.schema 与 output.render，杜绝模型系统提示词构建与对话流断流。
  */
 
 import { CarbonEngineBridge } from './bridge.js'
@@ -11,15 +13,126 @@ export const name = 'carbon-asset'
 export const inject = ['tools']
 
 /**
- * 模拟或使用 @deepseek-ai/dsh-tools 的 defineTool 声明
+ * 动态加载或内置编译为标准 ToolDefinition
  */
-function defineTool(def: {
+let dshDefineTool: any = null
+try {
+  // @ts-ignore
+  const dshTools = await import('@deepseek-ai/dsh-tools')
+  dshDefineTool = dshTools?.defineTool
+} catch {
+  // 不在 dsh 源码工程内时使用内置编译器
+}
+
+/**
+ * 内置符合 dsh-tools 规范的 ToolDefinition 编译器
+ */
+function createToolDefinition(spec: {
   name: string
   description: string
   parameters: Record<string, any>
-  execute: (args: any) => Promise<any>
+  execute: (args: any, exec?: any) => Promise<any>
 }) {
-  return def
+  if (typeof dshDefineTool === 'function') {
+    try {
+      return dshDefineTool({
+        name: spec.name,
+        description: spec.description,
+        parameters: spec.parameters,
+        output: {
+          schema: { type: 'object', additionalProperties: true },
+          render: (_args: unknown, value: any) => [
+            { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }
+          ],
+        },
+        execute: spec.execute,
+      })
+    } catch {
+      // 降级为自编译
+    }
+  }
+
+  // 严格编译 ParameterSchemaSpec 为标准 JSON Schema 对象
+  const properties: Record<string, any> = {}
+  const required: string[] = []
+
+  for (const [key, prop] of Object.entries(spec.parameters)) {
+    if (prop.required) {
+      required.push(key)
+    }
+
+    const compiled: Record<string, any> = {
+      type: prop.type,
+    }
+    if (prop.description) {
+      compiled.description = prop.description
+    }
+
+    if (prop.type === 'array' && prop.items) {
+      const items: Record<string, any> = {
+        type: prop.items.type,
+        additionalProperties: prop.items.additionalProperties !== undefined ? prop.items.additionalProperties : true,
+      }
+      if (prop.items.description) {
+        items.description = prop.items.description
+      }
+      if (prop.items.properties) {
+        const itemProps: Record<string, any> = {}
+        const itemReq: string[] = []
+        for (const [pk, pv] of Object.entries(prop.items.properties)) {
+          const pval = pv as any
+          if (pval.required) itemReq.push(pk)
+          itemProps[pk] = {
+            type: pval.type,
+            ...(pval.description ? { description: pval.description } : {}),
+          }
+        }
+        items.properties = itemProps
+        if (itemReq.length > 0) items.required = itemReq
+      }
+      compiled.items = items
+    } else if (prop.type === 'object') {
+      compiled.additionalProperties = prop.additionalProperties !== undefined ? prop.additionalProperties : true
+      if (prop.properties) {
+        const objProps: Record<string, any> = {}
+        const objReq: string[] = []
+        for (const [pk, pv] of Object.entries(prop.properties)) {
+          const pval = pv as any
+          if (pval.required) objReq.push(pk)
+          objProps[pk] = {
+            type: pval.type,
+            ...(pval.description ? { description: pval.description } : {}),
+          }
+        }
+        compiled.properties = objProps
+        if (objReq.length > 0) compiled.required = objReq
+      }
+    }
+
+    properties[key] = compiled
+  }
+
+  const parametersSchema: Record<string, any> = {
+    type: 'object',
+    properties,
+    additionalProperties: false,
+  }
+  if (required.length > 0) {
+    parametersSchema.required = required
+  }
+
+  return {
+    name: spec.name,
+    description: spec.description,
+    parameters: parametersSchema,
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args: unknown, value: any) => [
+        { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }
+      ],
+    },
+    execute: spec.execute,
+  }
 }
 
 export function apply(ctx: any, config: any = {}) {
@@ -27,7 +140,7 @@ export function apply(ctx: any, config: any = {}) {
 
   // 1. 车队碳排放基线测算工具
   ctx.tools?.register(
-    defineTool({
+    createToolDefinition({
       name: 'carbon_calculate',
       description: '测算物流企业车队的年度直接运营碳排放总量 (tCO2e)、模拟碳预算对标差额及碳价情景合规成本。',
       parameters: {
@@ -36,13 +149,24 @@ export function apply(ctx: any, config: any = {}) {
           type: 'array',
           required: true,
           description: '车队分组列表，每组包含 vehicle_type(车型), count(车辆数), annual_km(年均公里数), load_factor(满载率 0~1)',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            description: '车型分组信息',
+            properties: {
+              vehicle_type: { type: 'string', required: true, description: '车型名称（如：重型柴油货车、中型柴油货车、轻型柴油货车、微型汽油货车、新能源物流车）' },
+              count: { type: 'number', required: true, description: '车辆数量（辆）' },
+              annual_km: { type: 'number', required: true, description: '单车年均公里数（km）' },
+              load_factor: { type: 'number', description: '平均满载率（0~1之间，默认0.75）' },
+            },
+          },
         },
         scenario_reduction_target: {
           type: 'number',
           description: '模拟碳预算的情景减排紧缩目标，默认 0.10 (即90%历史强度基准)',
         },
       },
-      async execute(args) {
+      async execute(args: any) {
         return await bridge.execute('/api/calculate', 'calculate', args)
       },
     })
@@ -50,7 +174,7 @@ export function apply(ctx: any, config: any = {}) {
 
   // 2. TCO 全生命周期拥有成本与投资回收期测算工具
   ctx.tools?.register(
-    defineTool({
+    createToolDefinition({
       name: 'carbon_tco_evaluate',
       description: '测算燃油货车替换为纯电动商用车的全生命周期综合拥有成本(TCO)、初始增量投资(ΔCAPEX)、年运营节省(ΔOPEX)、静态投资回收期(年)以及单位吨碳减排边际成本(MAC)。',
       parameters: {
@@ -63,7 +187,7 @@ export function apply(ctx: any, config: any = {}) {
         ev_vehicle_price_wan: { type: 'number', description: '自定义新能源车单车购置价 (万元)' },
         lifespan_years: { type: 'number', description: '评估周期年限 (默认 5 年)' },
       },
-      async execute(args) {
+      async execute(args: any) {
         return await bridge.execute('/api/tco/calculate', 'tco', args)
       },
     })
@@ -71,19 +195,38 @@ export function apply(ctx: any, config: any = {}) {
 
   // 3. 车队减排情景模拟工具
   ctx.tools?.register(
-    defineTool({
+    createToolDefinition({
       name: 'carbon_reduction_scenario',
       description: '为车队组合配置减排措施（如将部分燃油车替换为纯电动车、提高调度满载率），评估减排潜力、对标成本节省及 TCO 投资回收期。',
       parameters: {
-        baseline_fleet: { type: 'array', required: true, description: '基线车队配置列表' },
+        baseline_fleet: {
+          type: 'array',
+          required: true,
+          description: '基线车队配置列表',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            description: '车型分组信息',
+            properties: {
+              vehicle_type: { type: 'string', required: true, description: '车型名称' },
+              count: { type: 'number', required: true, description: '车辆数量' },
+              annual_km: { type: 'number', required: true, description: '年均公里数' },
+              load_factor: { type: 'number', description: '满载率' },
+            },
+          },
+        },
         changes: {
           type: 'object',
           required: true,
+          additionalProperties: true,
           description: '减排措施映射字典，如 {"替换为新能源物流车": 10, "提升满载率至0.85": 20}',
         },
-        budget_reduction_target: { type: 'number', description: '基准预算缩减目标 (默认 0.10)' },
+        budget_reduction_target: {
+          type: 'number',
+          description: '基准预算缩减目标 (默认 0.10)',
+        },
       },
-      async execute(args) {
+      async execute(args: any) {
         return await bridge.execute('', 'reduction', args)
       },
     })
@@ -91,14 +234,18 @@ export function apply(ctx: any, config: any = {}) {
 
   // 4. 碳市场政策法规智能问答工具
   ctx.tools?.register(
-    defineTool({
+    createToolDefinition({
       name: 'carbon_policy_query',
       description: '基于中国碳排放权交易法规、CCER自愿减排机制与绿色交通双碳政策知识库，回答企业的政策合规、基准线与履约问题，带政策条款原文来源溯源。',
       parameters: {
         question: { type: 'string', required: true, description: '用户或企业的政策咨询问题' },
-        carbon_profile: { type: 'object', description: '可选的企业碳画像数据（如总排放量、车队规模、预算差额等）' },
+        carbon_profile: {
+          type: 'object',
+          additionalProperties: true,
+          description: '可选的企业碳画像数据（如总排放量、车队规模、预算差额等）',
+        },
       },
-      async execute(args) {
+      async execute(args: any) {
         return await bridge.execute('/api/ask', 'policy', args)
       },
     })
@@ -106,7 +253,7 @@ export function apply(ctx: any, config: any = {}) {
 
   // 5. 多企业/多车队碳资产横向对标工具
   ctx.tools?.register(
-    defineTool({
+    createToolDefinition({
       name: 'carbon_enterprise_compare',
       description: '对 2 个及以上物流企业或车队进行横向碳对标比较，输出各企业排放排名、模拟碳预算差额排名及情景成本对比。',
       parameters: {
@@ -114,17 +261,35 @@ export function apply(ctx: any, config: any = {}) {
           type: 'array',
           required: true,
           description: '企业列表，每个企业包含 company_name 和 fleet 列表',
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            description: '单个企业车队信息',
+            properties: {
+              company_name: { type: 'string', required: true, description: '企业名称' },
+              fleet: {
+                type: 'array',
+                required: true,
+                description: '车队分组',
+                items: {
+                  type: 'object',
+                  additionalProperties: true,
+                  properties: {
+                    vehicle_type: { type: 'string', required: true, description: '车型名称' },
+                    count: { type: 'number', required: true, description: '车辆数量' },
+                    annual_km: { type: 'number', required: true, description: '年均公里数' },
+                    load_factor: { type: 'number', description: '满载率' },
+                  },
+                },
+              },
+              scenario_reduction_target: { type: 'number', description: '情景减排目标' },
+            },
+          },
         },
       },
-      async execute(args) {
+      async execute(args: any) {
         return await bridge.execute('/api/compare', 'compare', args)
       },
     })
   )
-}
-
-export default {
-  name,
-  inject,
-  apply,
 }

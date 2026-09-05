@@ -3,10 +3,13 @@
  *
  * 通信策略：
  * 1. 优先尝试向 FastAPI 服务 (默认 http://127.0.0.1:8000) 发起异步 HTTP 请求；
- * 2. 若 API 服务未启动或通信超时，自动降级为启动 Python 子进程调用 scripts/cli_bridge.py。
+ * 2. 若 API 服务未启动或通信超时，自动降级为启动 Python 子进程调用 scripts/cli_bridge.py；
+ * 3. 具备自适应路径发现与错误自愈容错，杜绝未捕获异常导致 Agent 崩溃。
  */
 // @ts-ignore
 import { spawn } from 'node:child_process';
+// @ts-ignore
+import * as fs from 'node:fs';
 // @ts-ignore
 import * as path from 'node:path';
 // @ts-ignore
@@ -22,24 +25,102 @@ export class CarbonEngineBridge {
         const env = (typeof process !== 'undefined' && process.env) ? process.env : {};
         this.apiBaseUrl = config.apiBaseUrl || env.CARBON_API_BASE_URL || 'http://127.0.0.1:8000';
         this.preferHttp = config.preferHttp !== false;
-        this.pythonPath = config.pythonPath || env.PYTHON_PATH || 'python';
-        this.projectRoot = config.projectRoot || path.resolve(__dirname, '../../../');
+        // 1. 自适应探测项目根目录 (需包含 scripts/cli_bridge.py)
+        this.projectRoot = this.detectProjectRoot(config.projectRoot, env);
+        // 2. 自适应探测有效 Python 解释器路径
+        this.pythonPath = this.detectPythonPath(config.pythonPath, env, this.projectRoot);
+    }
+    detectProjectRoot(explicitRoot, env = {}) {
+        const candidates = [
+            explicitRoot,
+            env.CARBON_PROJECT_ROOT,
+            path.resolve(__dirname, '../../../'),
+            path.resolve(__dirname, '../../'),
+            'd:/大创 十月中期汇报',
+            'd:\大创 十月中期汇报',
+            process.cwd(),
+        ];
+        for (const c of candidates) {
+            if (c && typeof c === 'string') {
+                try {
+                    const script = path.resolve(c, 'scripts', 'cli_bridge.py');
+                    if (fs.existsSync(script)) {
+                        return path.resolve(c);
+                    }
+                }
+                catch {
+                    // ignore
+                }
+            }
+        }
+        return path.resolve(__dirname, '../../../');
+    }
+    detectPythonPath(explicitPython, env = {}, projectRoot = '') {
+        const candidates = [
+            explicitPython,
+            env.PYTHON_PATH,
+            path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe'),
+            path.resolve(projectRoot, '.venv', 'bin', 'python'),
+            'D:\大创\.venv\Scripts\python.exe',
+            'D:/大创/.venv/Scripts/python.exe',
+            path.resolve(projectRoot, 'venv', 'Scripts', 'python.exe'),
+            path.resolve(projectRoot, 'venv', 'bin', 'python'),
+            process.platform === 'win32' ? 'python' : 'python3',
+            'python',
+        ];
+        for (const c of candidates) {
+            if (c && typeof c === 'string') {
+                try {
+                    if (fs.existsSync(c)) {
+                        return c;
+                    }
+                }
+                catch {
+                    // ignore
+                }
+            }
+        }
+        return explicitPython || 'python';
     }
     /**
-     * 统一执行入口（带自动降级回退机制）
+     * 统一执行入口（带自动降级回退与异常软隔离机制）
      */
     async execute(endpoint, command, payload) {
         if (this.preferHttp) {
             try {
                 return await this.callHttp(endpoint, payload);
             }
-            catch (err) {
+            catch (httpErr) {
                 // HTTP 连接失败（服务未启动），自动降级为本地 CLI 进程
-                return await this.callCli(command, payload);
+                try {
+                    return await this.callCli(command, payload);
+                }
+                catch (cliErr) {
+                    // 双通道均失败时，返回结构化错误报告，避免 Harness 调度循环崩溃
+                    return {
+                        status: 'error',
+                        error: `碳资产计算引擎调用失败: [HTTP] ${httpErr.message}; [CLI] ${cliErr.message}`,
+                        suggestion: '请确认已启动后端服务 (http://127.0.0.1:8000) 或配置正确的 Python 运行环境。',
+                    };
+                }
             }
         }
         else {
-            return await this.callCli(command, payload);
+            try {
+                return await this.callCli(command, payload);
+            }
+            catch (cliErr) {
+                try {
+                    return await this.callHttp(endpoint, payload);
+                }
+                catch (httpErr) {
+                    return {
+                        status: 'error',
+                        error: `碳资产计算引擎调用失败: [CLI] ${cliErr.message}; [HTTP] ${httpErr.message}`,
+                        suggestion: '请确认已启动后端服务 (http://127.0.0.1:8000) 或配置正确的 Python 运行环境。',
+                    };
+                }
+            }
         }
     }
     /**
@@ -75,6 +156,9 @@ export class CarbonEngineBridge {
      */
     async callCli(command, payload) {
         const scriptPath = path.resolve(this.projectRoot, 'scripts', 'cli_bridge.py');
+        if (!fs.existsSync(scriptPath)) {
+            throw new Error(`未找到桥接脚本: ${scriptPath}`);
+        }
         const jsonInput = JSON.stringify(payload || {});
         const env = (typeof process !== 'undefined' && process.env) ? process.env : {};
         return new Promise((resolve, reject) => {

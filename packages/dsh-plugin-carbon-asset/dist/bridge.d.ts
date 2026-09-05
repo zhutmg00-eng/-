@@ -3,7 +3,8 @@
  *
  * 通信策略：
  * 1. 优先尝试向 FastAPI 服务 (默认 http://127.0.0.1:8000) 发起异步 HTTP 请求；
- * 2. 若 API 服务未启动或通信超时，自动降级为启动 Python 子进程调用 scripts/cli_bridge.py。
+ * 2. 若 API 服务未启动或通信超时，自动降级为启动 Python 子进程调用 scripts/cli_bridge.py；
+ * 3. 具备自适应路径发现与错误自愈容错，杜绝未捕获异常导致 Agent 崩溃。
  */
 export interface BridgeConfig {
     apiBaseUrl?: string;
@@ -17,8 +18,10 @@ export declare class CarbonEngineBridge {
     private pythonPath;
     private projectRoot;
     constructor(config?: BridgeConfig);
+    private detectProjectRoot;
+    private detectPythonPath;
     /**
-     * 统一执行入口（带自动降级回退机制）
+     * 统一执行入口（带自动降级回退与异常软隔离机制）
      */
     execute<T = any>(endpoint: string, command: string, payload: any): Promise<T>;
     /**
