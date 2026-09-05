@@ -198,3 +198,20 @@ class TestTCOReductionIntegration:
         tco_rec = [r for r in scenario.recommendations if "TCO 投资评估" in r]
         assert len(tco_rec) >= 1
         assert "静态投资回收期" in tco_rec[0]
+
+    def test_reduction_scenario_multi_type_tco_count(self):
+        """测试多车型车队中新能源替换TCO不会重复累计每种车型的替换数。"""
+        fleet = [
+            VehicleGroupData("重型柴油货车", 50, 80000, 0.75),
+            VehicleGroupData("轻型柴油货车", 30, 30000, 0.75),
+        ]
+        scenario = analyze_reduction_scenario(
+            baseline_fleet=fleet,
+            changes={"替换为新能源物流车": 10},
+        )
+        assert scenario.tco_analysis is not None
+        assert scenario.tco_analysis["total_replace_count"] == 10
+        assert "重型柴油货车" in scenario.tco_analysis["by_vehicle_type"]
+        assert scenario.tco_analysis["by_vehicle_type"]["重型柴油货车"]["replace_count"] == 10
+        assert "轻型柴油货车" not in scenario.tco_analysis["by_vehicle_type"]
+

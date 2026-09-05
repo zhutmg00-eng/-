@@ -233,11 +233,12 @@ def _render_scenario(scenario: dict) -> None:
             single_tco_map = tco.get("by_vehicle_type", {})
             vtype = scenario.get("selected_type", "重型柴油货车")
             single_info = single_tco_map.get(vtype, {})
+            km = float(single_info.get("annual_km", 80000.0))
             st.plotly_chart(
                 plot_tco_cost_breakdown(
                     vtype,
                     scenario.get("replace_count", 1),
-                    80000.0,
+                    km,
                     single_info,
                 ),
                 width="stretch",

@@ -304,20 +304,24 @@ def analyze_reduction_scenario(
             "预算结余_t": scenario_cost.get("预算结余_t", 0),
         }
 
-        # 计算 TCO 投资经济账（当措施包含新能源替换时）
+    # 计算 TCO 投资经济账（当措施包含新能源替换时）
     tco_analysis_dict = None
     if any("新能源" in k for k in changes):
         tco_replacements = []
+        remaining_to_replace = sum(c for k, c in changes.items() if "新能源" in k)
         for g in baseline_fleet:
-            if any("新能源" in k for k in changes):
-                # 获取该车型的替换数量
-                rcount = sum(c for k, c in changes.items() if "新能源" in k)
-                # 计算该车型被替换部分的单车年减排
+            if remaining_to_replace <= 0:
+                break
+            if g.vehicle_type == "新能源物流车":
+                continue
+            replace_num = min(remaining_to_replace, g.count)
+            remaining_to_replace -= replace_num
+            if replace_num > 0:
                 ef_old = REPLACEMENT_MAP.get(g.vehicle_type, (None, 0.877))[1]
-                co2_red = (rcount * g.annual_km * ef_old) / 1000.0
+                co2_red = (replace_num * g.annual_km * ef_old) / 1000.0
                 tco_replacements.append({
                     "vehicle_type": g.vehicle_type,
-                    "replace_count": min(rcount, g.count),
+                    "replace_count": replace_num,
                     "annual_km": g.annual_km,
                     "annual_co2_reduction_t": co2_red,
                 })
