@@ -114,6 +114,19 @@ AVG_ANNUAL_KM = {
 # 核心函数
 # ============================================================
 
+def _summarize_fleet(fleet: List[VehicleGroupData]) -> dict:
+    """按车型累加车辆数（同车型多组合并，避免 dict 覆盖丢组）
+
+    排放计算按分组加总；若此处用 dict 直接覆盖，同车型多组输入时
+    预算基准会漏计（如 30+20 辆重型车只计 20），导致预算差额与
+    排放口径不一致。
+    """
+    summary = {}
+    for g in fleet:
+        summary[g.vehicle_type] = summary.get(g.vehicle_type, 0) + g.count
+    return summary
+
+
 def _build_scenario_fleet(baseline_fleet: List[VehicleGroupData], changes: dict) -> List[VehicleGroupData]:
     """
     根据减排措施构建情景车队
@@ -259,7 +272,7 @@ def analyze_reduction_scenario(
     reduction_pct = round(reduction_t / baseline_emission * 100, 2) if baseline_emission > 0 else 0.0
 
     # 估算模拟碳预算差额变化
-    baseline_fleet_summary = {g.vehicle_type: g.count for g in baseline_fleet}
+    baseline_fleet_summary = _summarize_fleet(baseline_fleet)
     scenario_fleet_summary = {}
     for g in scenario_fleet:
         scenario_fleet_summary[g.vehicle_type] = scenario_fleet_summary.get(g.vehicle_type, 0) + g.count
@@ -384,7 +397,7 @@ def compare_scenarios(
 
     # 检查是否有情景能消除模拟碳预算超出量
     baseline = calculate_emission(baseline_fleet)
-    baseline_summary = {g.vehicle_type: g.count for g in baseline_fleet}
+    baseline_summary = _summarize_fleet(baseline_fleet)
     baseline_gap = estimate_quota_gap(baseline.total_emission_t, baseline_summary)
 
     for r in results:
@@ -603,7 +616,7 @@ def _generate_recommendations(
 
     # 模拟碳预算差额相关建议
     baseline = calculate_emission(baseline_fleet)
-    baseline_summary = {g.vehicle_type: g.count for g in baseline_fleet}
+    baseline_summary = _summarize_fleet(baseline_fleet)
     baseline_gap = estimate_quota_gap(baseline.total_emission_t, baseline_summary)
 
     if baseline_gap.gap_t > 0:

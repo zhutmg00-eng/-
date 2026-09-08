@@ -10,21 +10,38 @@ import { CarbonEngineBridge } from './bridge.js';
 export const name = 'carbon-asset';
 export const inject = ['tools'];
 /**
- * 动态加载或内置编译为标准 ToolDefinition
+ * 解析 dsh-tools 的 defineTool：优先取宿主注入的全局 dshDefineTool
+ * 或同步 require；不在模块顶层 await（避免 CJS require(esm) 加载阻塞）。
  */
-let dshDefineTool = null;
-try {
-    // @ts-ignore
-    const dshTools = await import('@deepseek-ai/dsh-tools');
-    dshDefineTool = dshTools?.defineTool;
-}
-catch {
-    // 不在 dsh 源码工程内时使用内置编译器
+function resolveDefineTool() {
+    try {
+        const g = (typeof globalThis !== 'undefined' ? globalThis : {}) || {};
+        if (typeof g.dshDefineTool === 'function') {
+            return g.dshDefineTool;
+        }
+        const req = typeof g.require === 'function' ? g.require : null;
+        if (req) {
+            try {
+                const dshTools = req('@deepseek-ai/dsh-tools');
+                if (dshTools && typeof dshTools.defineTool === 'function') {
+                    return dshTools.defineTool;
+                }
+            }
+            catch {
+                // 未安装，回退内置编译器
+            }
+        }
+    }
+    catch {
+        // 任何异常都回退内置编译器
+    }
+    return null;
 }
 /**
  * 内置符合 dsh-tools 规范的 ToolDefinition 编译器
  */
 function createToolDefinition(spec) {
+    const dshDefineTool = resolveDefineTool();
     if (typeof dshDefineTool === 'function') {
         try {
             return dshDefineTool({

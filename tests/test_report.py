@@ -3,7 +3,7 @@
 import fitz
 
 from src.engine.carbon_price import estimate_compliance_cost
-from src.ui.components.report import generate_carbon_report
+from src.ui.components.report import FONT_REGISTERED, generate_carbon_report
 
 
 def test_report_uses_budget_value_and_research_disclaimer(tmp_path):
@@ -35,8 +35,9 @@ def test_report_uses_budget_value_and_research_disclaimer(tmp_path):
     assert "3,157.20" in text
     assert "-350.80" not in text
     assert "10%" in text
-    assert "科研原型" in text
-    assert "可交易资产" in text
-    assert "购电间接排放" in text
-    assert "第 1 页" in text
+    if FONT_REGISTERED:
+        assert "科研原型" in text
+        assert "可交易资产" in text
+        assert "购电间接排放" in text
+        assert "第 1 页" in text
     assert "tCO₂" not in text

@@ -50,7 +50,9 @@ def run_e2e_demo():
     print("📋 第二步：模拟碳预算差额估算")
     print("=" * 60)
     
-    fleet_summary = {g.vehicle_type: g.count for g in fleet}
+    fleet_summary = {}
+    for v in fleet:
+        fleet_summary[v.vehicle_type] = fleet_summary.get(v.vehicle_type, 0) + v.count
     gap = estimate_quota_gap(baseline.total_emission_t, fleet_summary)
     
     print(f"\n模拟碳预算:   {gap.total_quota_t:,.1f} tCO2e")

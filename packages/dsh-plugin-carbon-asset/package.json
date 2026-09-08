@@ -4,7 +4,6 @@
   "type": "module",
   "description": "DeepSeek Harness (dsh) plugin for commercial freight carbon accounting, TCO payback evaluation, reduction scenario modeling, and policy intelligence.",
   "main": "dist/index.js",
-  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "files": [
     "dist",

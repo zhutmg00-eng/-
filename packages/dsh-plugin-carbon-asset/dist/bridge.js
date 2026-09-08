@@ -36,8 +36,6 @@ export class CarbonEngineBridge {
             env.CARBON_PROJECT_ROOT,
             path.resolve(__dirname, '../../../'),
             path.resolve(__dirname, '../../'),
-            'd:/大创 十月中期汇报',
-            'd:\大创 十月中期汇报',
             process.cwd(),
         ];
         for (const c of candidates) {
@@ -61,8 +59,6 @@ export class CarbonEngineBridge {
             env.PYTHON_PATH,
             path.resolve(projectRoot, '.venv', 'Scripts', 'python.exe'),
             path.resolve(projectRoot, '.venv', 'bin', 'python'),
-            'D:\大创\.venv\Scripts\python.exe',
-            'D:/大创/.venv/Scripts/python.exe',
             path.resolve(projectRoot, 'venv', 'Scripts', 'python.exe'),
             path.resolve(projectRoot, 'venv', 'bin', 'python'),
             process.platform === 'win32' ? 'python' : 'python3',

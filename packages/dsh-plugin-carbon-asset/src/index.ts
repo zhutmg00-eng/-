@@ -13,15 +13,33 @@ export const name = 'carbon-asset'
 export const inject = ['tools']
 
 /**
- * 动态加载或内置编译为标准 ToolDefinition
+ * 解析 dsh-tools 的 defineTool：
+ * - 优先取宿主注入的全局 dshDefineTool（dsh 运行时提供）或同步 require；
+ * - 不在模块顶层执行动态 import —— 顶层 await 会让 CJS require(esm)
+ *   直接抛错（插件加载阻塞），部分 bundler 亦无法解析。
+ * - 解析失败/未安装时返回 null，由内置编译器兑底。
  */
-let dshDefineTool: any = null
-try {
-  // @ts-ignore
-  const dshTools = await import('@deepseek-ai/dsh-tools')
-  dshDefineTool = dshTools?.defineTool
-} catch {
-  // 不在 dsh 源码工程内时使用内置编译器
+function resolveDefineTool(): any {
+  try {
+    const g = (globalThis as any) || {}
+    if (typeof g.dshDefineTool === 'function') {
+      return g.dshDefineTool
+    }
+    const req = typeof g.require === 'function' ? g.require : null
+    if (req) {
+      try {
+        const dshTools = req('@deepseek-ai/dsh-tools')
+        if (dshTools && typeof dshTools.defineTool === 'function') {
+          return dshTools.defineTool
+        }
+      } catch {
+        // 未安装，回退内置编译器
+      }
+    }
+  } catch {
+    // 任何异常都回退内置编译器
+  }
+  return null
 }
 
 /**
@@ -33,6 +51,7 @@ function createToolDefinition(spec: {
   parameters: Record<string, any>
   execute: (args: any, exec?: any) => Promise<any>
 }) {
+  const dshDefineTool = resolveDefineTool()
   if (typeof dshDefineTool === 'function') {
     try {
       return dshDefineTool({
